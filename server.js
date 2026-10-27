@@ -395,7 +395,8 @@ server.listen(CONFIG.port, '0.0.0.0', () => {
 
 /**
  * 启动时探一下飞牛监控。
- * fnMonitor 不是 Docker 应用（它是飞牛应用中心装的本机服务），没法跟我们一起 compose 起来，
+ * fnMonitor 是第三方的 FPK 应用（github.com/MisiteQ/fnmonitor），不是 Docker 镜像，
+ * 没法跟我们一起 compose 起来，
  * 所以这里主动打一声招呼：连上了报一声，没连上也把「该去装什么」直接说清楚。
  */
 async function probeMonitor() {
@@ -410,7 +411,8 @@ async function probeMonitor() {
     }
   } catch {
     console.warn(`[fnstart] 没连上飞牛监控（${target}）`);
-    console.warn('[fnstart] 想让监控面板有数据，请先在飞牛应用中心安装并启动「飞牛监控 fnMonitor」');
+    console.warn('[fnstart] 想让监控面板有数据，请先安装并启动「飞牛监控 fnMonitor」');
+    console.warn('[fnstart] 它是第三方开源应用（MIT）：https://github.com/MisiteQ/fnmonitor');
     console.warn('[fnstart] 没有它也能用，只是右侧面板会提示离线');
   }
 }

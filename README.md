@@ -31,13 +31,15 @@ fnStart 不是"一个容器解决一切"。**完整功能需要两块拼图**：
 
 | 拼图 | 是什么 | 怎么来 |
 |---|---|---|
-| **① 飞牛监控 fnMonitor** | 飞牛 fnOS 上的一个应用，提供 `/api/overview` 实时数据，监听 **8777** | 在飞牛「应用中心」里安装并打开 |
+| **① 飞牛监控 fnMonitor** | 一个**第三方开源应用**（作者 MisiteQ，MIT），装在 `/vol1/@appcenter/fnmonitor`，提供 `/api/overview` 实时数据，监听 **8777** | 见下方「第 0 步」，两分钟装好 |
 | **② fnStart** | 本项目，一个 Node 容器，提供这一页 | `docker compose up -d` |
 
 ### 关于 fnMonitor，得说实话
 
-- 它是飞牛的应用，**不是 Docker 镜像**，所以没法写进 `docker-compose.yml` 跟着一起 `up`。你在应用中心点安装，它才存在。
+- 它**不是飞牛系统自带的**，也不在飞牛应用中心的默认源里。它是飞牛玩家 **Misite齊（GitHub [@MisiteQ](https://github.com/MisiteQ)）** 写的一个第三方开源应用（MIT），仓库在 <https://github.com/MisiteQ/fnmonitor>。
+- 它**不是 Docker 镜像**，是一个 FPK 应用包，所以没法写进 `docker-compose.yml` 跟着一起 `up`。得单独装（第 0 步）。
 - 本项目**不分发、不修改、不打包** fnMonitor 的任何代码。我们只是用 HTTP 去读它自己对外提供的 `/api/overview` 接口——和你用浏览器打开它的页面看到的是同一份数据。
+- 如果哪天它的接口变了导致面板空掉，那是本项目的锅，请来这边提 issue；但如果是 fnMonitor 本身的问题，请去[它的仓库](https://github.com/MisiteQ/fnmonitor)反馈。
 - **没装 fnMonitor 也能用**。只是右侧面板会显示"读不到监控数据"，其余功能（卡片、书签、搜索、天气、时钟）一切正常。
 
 ---
@@ -46,9 +48,21 @@ fnStart 不是"一个容器解决一切"。**完整功能需要两块拼图**：
 
 ### 第 0 步：装飞牛监控（想要监控面板就必做）
 
-1. 打开飞牛 NAS 的**应用中心**，搜索「**飞牛监控**」（fnMonitor），安装并启动
-2. 浏览器访问 `http://你的NAS地址:8777/#/overview`，能看见面板就对了
-3. 顺手验一下接口（后面 fnStart 读的就是它）：
+它不是商店自带的应用，得你自己装。两种方式，选一种。
+
+**方式一：FnDepot 应用源（推荐，能一键升级）**
+
+1. 在飞牛上装 [FnDepot](https://github.com/MisiteQ/FnDepot) 客户端
+2. 添加应用源 `https://github.com/MisiteQ/FnDepot`
+3. 搜索「飞牛监控」/ fnmonitor，安装
+
+**方式二：手动装 FPK**
+
+1. 去 <https://github.com/MisiteQ/fnmonitor/releases> 下载对应架构的 `.fpk`（x86 / ARM 别下错）
+2. 飞牛「应用中心 → 手动安装」选这个文件
+3. 如果手动安装入口是灰的，SSH 里执行 `appcenter-cli manual-install enable` 打开它
+
+装完验证一下（下面 fnStart 读的就是这个接口）：
 
 ```bash
 curl http://你的NAS地址:8777/api/overview | head -c 200
@@ -252,8 +266,11 @@ volumes:
 
 这个项目站在别人肩膀上，该说清楚的都写在这儿。
 
-**飞牛 fnOS / 飞牛监控 fnMonitor** — 本项目是"飞牛用户专属"的工具，界面观感（深色底、点阵数字、细线计量条、卡片式指标）明显受 fnMonitor 首页启发；数据通过它对外提供的 `/api/overview` 接口读取。
-需要特别说明的是：**仓库里不包含 fnMonitor 或 fnOS 的任何一行代码、任何一份样式表。** 早期原型为了对照效果曾经直接引用过它的 CSS，在开源前已经整份删除并重写为 `public/css/fn-theme.css`（约 4KB，全是本项目自己写的规则），点阵字模也是自己写的 5×7 位图表。fnMonitor 的版权归飞牛（fnOS）所有，本项目与飞牛官方**没有任何隶属或背书关系**。
+**飞牛监控 fnMonitor** — 本项目的右侧面板，数据、观感、点阵数字的审美都来自它。
+作者 **Misite齊**（GitHub [@MisiteQ](https://github.com/MisiteQ)），**MIT 许可**，仓库：<https://github.com/MisiteQ/fnmonitor>。它是个纯 Python 标准库 + 单文件前端的应用，零第三方依赖、数据只留在本机 SQLite，确实下了功夫，推荐去给它点个 star。
+需要说明的是：**本仓库不包含 fnMonitor 的任何代码或样式表**，我们只是消费者——通过 HTTP 读它的 `/api/overview`。早期原型为了对照效果曾经直接引用过它的 CSS，开源前已经整份删除并重写为 `public/css/fn-theme.css`（约 4KB，全是本项目自己写的规则），点阵字模也是自己写的 5×7 位图表。本项目与 fnMonitor 作者、与飞牛官方**都没有隶属或背书关系**。
+
+**飞牛 fnOS** — 运行平台。fnStart 依赖它提供的东西：`/proc/net/tcp`、Docker、以及应用中心装出来的 fnMonitor。本项目与飞牛官方无隶属关系。
 
 **open-meteo** — 天气数据来源，免费、免密钥。数据以 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 授权提供，感谢他们不收费也不要求注册。
 <https://open-meteo.com/>

@@ -4,7 +4,8 @@ services:
     image: fnstart:latest
     container_name: fnstart
     restart: unless-stopped
-    # 前置依赖：飞牛监控 fnMonitor（飞牛应用中心里安装，监听 8777）。
+    # 前置依赖：飞牛监控 fnMonitor —— 第三方开源应用（MIT，github.com/MisiteQ/fnmonitor），
+    # 装在 /vol1/@appcenter/fnmonitor，监听 8777。
     # 它不是 Docker 应用，没法写进这份 compose 一起起来；
     # 没装也能用，只是右侧监控面板会提示离线。
     # 关键：必须用 host 网络。

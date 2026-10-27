@@ -800,8 +800,8 @@ select.sel option{background:#151b2c;color:var(--ink)}
   .date-chip .date-dm{--dm-h:19px}
   .date-chip .date-week{font-size:12px}
 }
-@media (max-width:760px){
-  /* 窄屏优先保证搜索栏，日期先收起来 */
+@media (max-width:920px){
+  /* 天气 + 搜索 + 时间 + 日期，四件东西一行塞不下就先收起日期 */
   .date-chip{display:none}
 }
 @media (max-width:620px){
@@ -809,3 +809,112 @@ select.sel option{background:#151b2c;color:var(--ink)}
   .chip-dm{--dm-h:16px}
   .wx-chip .chip-ico{display:none}
 }
+
+/* ==========================================================================
+   手机 / 窄屏（≤680px）
+   手机上没有 hover、横向空间只有 375 左右，所以这一段是整套重排，
+   不是把桌面版等比缩小。
+   ========================================================================== */
+@media (max-width:680px){
+  .app{padding:14px 13px calc(88px + env(safe-area-inset-bottom))}
+  .topbar{gap:10px;margin-bottom:14px}
+  .brand{gap:8px}
+  .brand-mark{width:8px;height:20px;border-radius:3px}
+  .site-title{font-size:16.5px;padding:2px 6px;margin-left:-6px}
+  .brand-sub{display:none}          /* 副标题在手机上纯占地方 */
+  .topbar-tools{gap:6px}
+  .tool-btn{width:34px;height:34px;border-radius:10px}
+  .tool-btn .ic{width:16px;height:16px}
+
+  /* 搜索区折成两行：搜索框独占一行，天气/时间掉到下面一行 */
+  .search-row{flex-wrap:wrap;gap:9px 10px;margin-bottom:20px;justify-content:space-between}
+  .search-row .search-zone{order:1;flex:1 1 100%;max-width:none}
+  .wx-chip{order:2}
+  .clock-chip{order:3;margin-left:auto}
+  .chip{height:40px;padding:0 13px;border-radius:20px;gap:7px}
+  .chip-dm{--dm-h:15px}
+  .chip-ico{font-size:14px}
+  .chip-unit{font-size:11px}
+  /* 第二行有空位了，天气图标恢复显示（≤620 那条是为了挤一行才藏的） */
+  .wx-chip .chip-ico{display:inline}
+  .wx-chip{padding-right:15px}
+  .searchbar{height:48px;border-radius:24px}
+  /* iOS 上输入框字号小于 16px 会自动放大页面，这条不能省 */
+  #q{font-size:16px}
+  .hint{margin-top:7px;font-size:11px}
+
+  /* 分组标题与「+」：原来的 19px 在手机上好难点，放大一档 */
+  .board-sep{font-size:11.5px;letter-spacing:1px;gap:10px;margin-bottom:12px}
+  .board-sep .sep-add{width:26px;height:26px;border-radius:8px}
+  .board-sep .sep-add .ic{width:13px;height:13px}
+
+  /* 卡片压缩一点，一屏能多看两张 */
+  .card{min-height:70px;padding:11px 12px;gap:10px;border-radius:16px}
+  .card-icon{width:36px;height:36px;border-radius:11px}
+  .card-icon img{width:21px;height:21px}
+  .card-name{font-size:14px}
+  .card-desc{font-size:10.5px;margin-top:1px}
+
+  /* 悬浮按钮与监控胶囊：都挪到右下角竖排，避开底部安全区 */
+  .fab{right:14px;bottom:calc(84px + env(safe-area-inset-bottom));width:48px;height:48px;border-radius:15px}
+  body.has-fn .app{padding-right:13px}   /* 胶囊只有 48px，不用再让出 86px */
+  .fn-pill{
+    right:12px;top:auto;bottom:calc(18px + env(safe-area-inset-bottom));
+    width:48px;height:48px;border-radius:15px;
+    border-right:1px solid rgba(255,255,255,.17);
+    transform:none;animation:none;
+  }
+  .fn-pill:hover{width:48px}
+  .fn-pill .fn-stats{display:none}
+  .fn-text{font-size:12px}
+  body.layout-focus .fn-pill{bottom:calc(18px + env(safe-area-inset-bottom));height:48px}
+  body.layout-focus .fab{right:14px}
+
+  /* 设置面板在手机上占满宽度 */
+  .modal-card{max-height:94vh}
+  .field label{font-size:12px}
+}
+
+/* 触摸设备：没有 hover，卡片上的编辑/删除按钮必须一直显示，否则根本点不到 */
+@media (hover:none) and (pointer:coarse){
+  .card-actions{opacity:1;transform:none}
+  .card-actions .act{width:30px;height:30px;border-radius:9px;background:rgba(8,12,20,.72)}
+  /* 两个按钮常显在右上角，给文字让出宽度，别把名字挤成省略号 */
+  .card{padding-right:74px}
+  /* 触摸时 :hover 会粘住，把桌面版的浮起和流光关掉，避免卡片像被"钉"住 */
+  .card:hover{transform:none}
+  .card:hover .card-glow{opacity:0;visibility:hidden;animation:none}
+  .chip:hover,.tool-btn:hover{transform:none}
+  .fn-pill:hover{width:48px}
+}
+
+/* 长按卡片的操作面板（手机上代替拖拽排序） */
+.sheet{position:fixed;inset:0;z-index:110;display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(4,7,14,.55);backdrop-filter:blur(3px);animation:fadeIn .18s var(--ease)}
+.sheet-card{
+  width:100%;max-width:520px;margin:0 8px calc(8px + env(safe-area-inset-bottom));
+  padding:10px 10px 8px;border-radius:20px;
+  background:linear-gradient(180deg,#1a2234,#101728);
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 -20px 60px -30px #000;
+  animation:sheetUp .22s var(--ease);
+}
+@keyframes sheetUp{from{transform:translateY(18px);opacity:.6}to{transform:none;opacity:1}}
+.sheet-title{padding:8px 12px 10px;font-size:13px;color:var(--ink-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sheet-btn{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:13px 12px;border-radius:13px;font-size:15px;color:var(--ink);
+  text-align:left;transition:background .15s;
+}
+.sheet-btn:active{background:rgba(255,255,255,.08)}
+.sheet-btn .ic{width:18px;height:18px;opacity:.75}
+.sheet-btn.danger{color:#ff8b87}
+.sheet-btn[disabled]{opacity:.35;pointer-events:none}
+.sheet-sep{height:1px;margin:6px 12px;background:rgba(255,255,255,.07)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* 滚动时把悬浮按钮收一收，免得一直压在卡片上（手机上尤其明显） */
+body.scrolling .fab,
+body.scrolling .fn-pill{opacity:0;transform:scale(.92);pointer-events:none}
+.fab,.fn-pill{transition:.22s var(--ease)}

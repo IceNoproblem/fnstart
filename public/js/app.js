@@ -567,6 +567,103 @@ async function endDrag() {
   if (after !== d.group) renderBoards();
 }
 
+/* ---------------- 手机上长按卡片：操作面板 ----------------
+ * 手机做不了「按住拖」——手指一滑页面就得滚，拖拽和滚动必然抢事件。
+ * 所以触摸设备改成：按住不动 450ms 弹面板，用「上移 / 下移」完成排序。
+ */
+let sheetEl = null;
+
+function closeCardSheet() {
+  if (sheetEl) {
+    sheetEl.remove();
+    sheetEl = null;
+  }
+}
+
+/** 同组内相邻的上/下一张，找不到返回 -1 */
+function siblingIndex(card, dir) {
+  const group = groupOf(card);
+  const idx = state.cards.findIndex((c) => c.id === card.id);
+  if (idx < 0) return -1;
+  if (dir < 0) {
+    for (let i = idx - 1; i >= 0; i--) if (groupOf(state.cards[i]) === group) return i;
+  } else {
+    for (let i = idx + 1; i < state.cards.length; i++) if (groupOf(state.cards[i]) === group) return i;
+  }
+  return -1;
+}
+
+async function moveCardBy(card, dir) {
+  const idx = state.cards.findIndex((c) => c.id === card.id);
+  const target = siblingIndex(card, dir);
+  if (idx < 0 || target < 0) return;
+  const arr = [...state.cards];
+  [arr[idx], arr[target]] = [arr[target], arr[idx]];
+  state.cards = arr;
+  renderBoards();
+  try {
+    const r = await api('/api/cards/reorder', { method: 'POST', body: { items: arr.map((c) => c.id) } });
+    if (r.cards) state.cards = r.cards;
+    renderBoards();
+    toast(dir < 0 ? '已上移' : '已下移');
+  } catch {
+    toast('排序保存失败', true);
+  }
+}
+
+function openCardSheet(card) {
+  closeCardSheet();
+  const canUp = siblingIndex(card, -1) >= 0;
+  const canDown = siblingIndex(card, 1) >= 0;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'sheet';
+  wrap.innerHTML = `
+    <div class="sheet-card" role="dialog" aria-label="卡片操作">
+      <div class="sheet-title">${escHtml(card.name)}</div>
+      <button class="sheet-btn" data-act="up"${canUp ? '' : ' disabled'}>
+        <svg class="ic" style="transform:rotate(180deg)"><use href="#i-chevron"/></svg>上移一位</button>
+      <button class="sheet-btn" data-act="down"${canDown ? '' : ' disabled'}>
+        <svg class="ic"><use href="#i-chevron"/></svg>下移一位</button>
+      <div class="sheet-sep"></div>
+      <button class="sheet-btn" data-act="edit"><svg class="ic"><use href="#i-edit"/></svg>编辑卡片</button>
+      <button class="sheet-btn danger" data-act="del"><svg class="ic"><use href="#i-trash"/></svg>删除卡片</button>
+      <div class="sheet-sep"></div>
+      <button class="sheet-btn" data-act="cancel">取消</button>
+    </div>`;
+  document.body.appendChild(wrap);
+  sheetEl = wrap;
+
+  wrap.addEventListener('click', async (e) => {
+    if (e.target.closest('.sheet') === wrap && !e.target.closest('.sheet-btn')) {
+      closeCardSheet();
+      return;
+    }
+    const btn = e.target.closest('.sheet-btn');
+    if (!btn || btn.disabled) return;
+    const act = btn.dataset.act;
+    if (act === 'cancel') return closeCardSheet();
+    if (act === 'up' || act === 'down') {
+      closeCardSheet();
+      await moveCardBy(card, act === 'up' ? -1 : 1);
+      return;
+    }
+    if (act === 'edit') {
+      closeCardSheet();
+      openCardModal(card);
+      return;
+    }
+    if (act === 'del') {
+      closeCardSheet();
+      if (!confirm(`删除「${card.name}」？`)) return;
+      await api(`/api/cards/${card.id}`, { method: 'DELETE' });
+      state.cards = state.cards.filter((c) => c.id !== card.id);
+      renderBoards();
+      toast('已删除');
+    }
+  });
+}
+
 el.boards.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   const card = e.target.closest('.card');
@@ -579,6 +676,21 @@ el.boards.addEventListener('pointerdown', (e) => {
     active: false,
     group: card.closest('.grid')?.dataset.group || 'service',
   };
+
+  // 触摸：长按出菜单，拖拽留给桌面（手指滑动必须留给页面滚动）
+  if (e.pointerType === 'touch') {
+    drag.hold = setTimeout(() => {
+      drag = null;
+      suppressClick = true;
+      setTimeout(() => (suppressClick = false), 700);
+      try {
+        navigator.vibrate?.(12);
+      } catch {}
+      openCardSheet(card);
+    }, 450);
+    return;
+  }
+
   // 捕获指针，避免移出卡片后事件丢失（这是之前"有时能拖有时不能"的主要原因之一）
   try {
     card.setPointerCapture(e.pointerId);
@@ -589,6 +701,14 @@ window.addEventListener(
   'pointermove',
   (e) => {
     if (!drag) return;
+    // 长按计时中：手指一移动就放弃长按，把这次手势交还给页面滚动
+    if (drag.hold) {
+      if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 10) {
+        clearTimeout(drag.hold);
+        drag = null;
+      }
+      return;
+    }
     if (!drag.active) {
       if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
       startDrag(e);
@@ -601,6 +721,11 @@ window.addEventListener(
 
 window.addEventListener('pointerup', (e) => {
   if (!drag) return;
+  if (drag.hold) {
+    clearTimeout(drag.hold);
+    drag = null;
+    return;
+  }
   try {
     drag.card.releasePointerCapture?.(e.pointerId);
   } catch {}
@@ -611,7 +736,29 @@ window.addEventListener('pointerup', (e) => {
     drag = null; // 没拖动 → 交给卡片自身的 click
   }
 });
-window.addEventListener('pointercancel', () => endDrag());
+window.addEventListener('pointercancel', () => {
+  if (drag?.hold) {
+    clearTimeout(drag.hold);
+    drag = null;
+    return;
+  }
+  endDrag();
+});
+
+
+/* 滚动时淡出悬浮按钮（手机上 + 和 fn 两个球会压住卡片） */
+(() => {
+  let t = 0;
+  window.addEventListener(
+    'scroll',
+    () => {
+      document.body.classList.add('scrolling');
+      clearTimeout(t);
+      t = setTimeout(() => document.body.classList.remove('scrolling'), 550);
+    },
+    { passive: true },
+  );
+})();
 
 /* ---------------- 搜索 ---------------- */
 function applyEngine() {
@@ -624,10 +771,14 @@ function applyEngine() {
   renderEngineMenu();
 }
 
-/** 搜索框下方的固定提示，切换引擎时也要跟着变 */
+const TOUCH = () => window.matchMedia('(hover: none)').matches;
+
+/** 搜索框下方的固定提示，切换引擎时也要跟着变（手机上不显示 ⌘K 这种键盘提示） */
 function defaultHint() {
   const eng = ENGINES.find((e) => e.id === (state.settings?.searchEngine || 'bing')) || ENGINES[0];
-  return `${eng.name} · <kbd>⌘K</kbd> 聚焦 · 输入网址直接打开`;
+  return TOUCH()
+    ? `${eng.name} · 输入网址直接打开`
+    : `${eng.name} · <kbd>⌘K</kbd> 聚焦 · 输入网址直接打开`;
 }
 
 function renderEngineMenu() {
@@ -715,6 +866,9 @@ function clearHighlight() {
   for (const node of el.boards.querySelectorAll(`.card.${MATCH_CLS}`)) node.classList.remove(MATCH_CLS);
   if (el.hint) el.hint.innerHTML = defaultHint();
 }
+
+// 窄屏上 placeholder 太长会被截成半句，换个短的
+if (window.innerWidth < 420) el.q.placeholder = '搜索或输入网址…';
 
 el.q.addEventListener('input', () => syncHighlight(el.q.value));
 el.q.addEventListener('keydown', (e) => {

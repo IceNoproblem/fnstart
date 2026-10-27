@@ -64,13 +64,21 @@ function readBody(req, limit = 30 * 1024 * 1024) {
   });
 }
 
+/** 带状态码的业务错误：上传超限该回 413，不该一律 500 */
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function readJson(req) {
   const buf = await readBody(req);
   if (!buf.length) return {};
   try {
     return JSON.parse(buf.toString('utf8'));
   } catch {
-    throw new Error('JSON 解析失败');
+    throw new HttpError(400, 'JSON 解析失败');
   }
 }
 
@@ -165,6 +173,8 @@ const html = (res, code, body) => {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
+    // 不外传 Referer：?token= 链接里带令牌，别让它跟着外链跑到别人服务器上
+    'Referrer-Policy': 'no-referrer',
   });
   res.end(body);
 };
@@ -217,6 +227,7 @@ async function serveFile(res, filePath, { cache = 'no-cache', download = false }
       'Content-Length': st.size,
       'Cache-Control': cache,
       'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
     };
     if (download) headers['Content-Disposition'] = 'attachment';
     // 上传的 SVG 是同源文档，直接打开会执行里面的事件脚本。
@@ -243,15 +254,15 @@ const safeJoin = (base, rel) => {
 
 const saveUpload = async (dir, dataUri, prefix = 'up', urlBase = '/backgrounds') => {
   const m = /^data:(image\/([\w.+-]+));base64,(.+)$/is.exec(String(dataUri || '').replace(/\s+/g, ''));
-  if (!m) throw new Error('图片格式不支持（需要 base64 data URI）');
+  if (!m) throw new HttpError(400, '图片格式不支持（需要 base64 data URI）');
   const extMap = { png: 'png', jpeg: 'jpg', jpg: 'jpg', webp: 'webp', svg: 'svg', gif: 'gif', 'svg+xml': 'svg', avif: 'avif', 'x-icon': 'ico', 'vnd.microsoft.icon': 'ico' };
   const ext = extMap[m[2].toLowerCase()] || 'png';
   let buf = Buffer.from(m[3], 'base64');
-  if (buf.length > 2 * 1024 * 1024) throw new Error('图片超过 2MB');
+  if (buf.length > 2 * 1024 * 1024) throw new HttpError(413, '图片超过 2MB');
   if (ext === 'svg') buf = sanitizeSvg(buf);
   await fs.mkdir(dir, { recursive: true });
   if ((await dirBytes(dir)) + buf.length > 200 * 1024 * 1024) {
-    throw new Error('图片目录已满（200MB），先清理一些不再用的图标');
+    throw new HttpError(507, '图片目录已满（200MB），先清理一些不再用的图标');
   }
   const file = `${prefix}-${crypto.randomBytes(8).toString('hex')}.${ext}`;
   await fs.writeFile(path.join(dir, file), buf);
@@ -579,8 +590,12 @@ const server = http.createServer(async (req, res) => {
     if (!f) return text(res, 400, 'bad path');
     return serveFile(res, f, { cache: p.startsWith('/assets/') ? 'public, max-age=86400' : 'no-cache' });
   } catch (e) {
-    console.error('[fnstart]', req.method, p, e?.message);
-    if (!res.headersSent) json(res, 500, { ok: false, error: e?.message || '服务内部错误' });
+    // 业务错误（上传超限之类）带自己的状态码；其它一律 500，且不把内部信息回给客户端
+    const code = e instanceof HttpError ? e.status : 500;
+    if (code === 500) console.error('[fnstart]', req.method, p, e?.message || e);
+    if (!res.headersSent) {
+      json(res, code, { ok: false, error: code === 500 ? '服务内部错误' : e.message });
+    }
   }
 });
 

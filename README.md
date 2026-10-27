@@ -48,15 +48,32 @@ fnStart 不是"一个容器解决一切"。**完整功能需要两块拼图**：
 
 ### 第 0 步：装飞牛监控（想要监控面板就必做）
 
-它不是商店自带的应用，得你自己装。两种方式，选一种。
+它不是商店自带的应用，得你自己装。三种方式，从最省事的往下选。
 
-**方式一：FnDepot 应用源（推荐，能一键升级）**
+**方式一：一条命令（推荐）**
+
+```bash
+# 如果还没把仓库放到 NAS 上，先来这一行
+git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
+
+sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
+```
+
+脚本干的事：认 CPU 架构 → 查上游最新版 → 下载对应 FPK → 调 `appcenter-cli` 装 → 等 8777 起来。**已经是装好的机器会直接跳过**，重复跑没有副作用。
+
+国内拉 GitHub 慢，加个加速前缀：
+
+```bash
+sudo GH_PROXY=https://ghfast.top/ bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
+```
+
+**方式二：FnDepot 应用源（能一键升级）**
 
 1. 在飞牛上装 [FnDepot](https://github.com/MisiteQ/FnDepot) 客户端
 2. 添加应用源 `https://github.com/MisiteQ/FnDepot`
 3. 搜索「飞牛监控」/ fnmonitor，安装
 
-**方式二：手动装 FPK**
+**方式三：手动装 FPK**
 
 1. 去 <https://github.com/MisiteQ/fnmonitor/releases> 下载对应架构的 `.fpk`（x86 / ARM 别下错）
 2. 飞牛「应用中心 → 手动安装」选这个文件
@@ -238,6 +255,18 @@ volumes:
 ---
 
 ## 常见问题
+
+**为什么不把 fnMonitor 一起写进 docker-compose，一条命令全起来？**
+
+问得好，我先试过这条路，但放弃了。原因不是懒，是它压根不是"容器型"应用——fnMonitor 是个**宿主机监控代理**，它的工作就是去摸硬件：
+
+- 调外部命令：`smartctl`（硬盘 SMART）、`storcli`/`perccli`（RAID 阵列卡）、`sensors`（温度风扇）、`ipmitool`（BMC）、`hdparm`、`lscpu`、`dmidecode`、`nvidia-smi`
+- 读系统路径：`/sys/class/hwmon`（传感器）、`/sys/block`、`/proc/{cpuinfo,stat,meminfo,mounts}`、`/dev/sd*`
+- 还有更狠的：`/dev/port` —— 直接读 I/O 端口，用来兼容 NEC / 联想商用机那种走私有 EC 邮箱的风扇
+
+要把它塞进容器，就得 `privileged: true`、挂 `/sys` `/dev` `/proc` `/var/apps` `/vol1/@appcenter` `/usr/trim`，再在镜像里装齐上面那堆系统工具。**这等于把整台 NAS 交给一个容器**，比装个 FPK 危险得多；顺带还会丢掉桌面图标和飞牛应用中心的升级管理，并且要跟着上游一天几版的迭代不停改我们的 compose。
+
+所以这一版的分工是：**fnMonitor 用它的方式装（一条命令），fnStart 用容器跑，两边只通过 `:8777/api/overview` 这个 HTTP 接口说话。** 谁升级都不影响谁。
 
 **右侧面板一直是"读不到监控数据"？**
 第 0 步没做，或者 8777 不通。`curl http://你的NAS:8777/api/overview` 试一下。用反代/HTTPS 的话，把 `MONITOR_URL` 显式写死。

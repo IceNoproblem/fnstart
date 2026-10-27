@@ -27,7 +27,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "selftest": "node scripts/selftest.mjs"
+    "selftest": "node scripts/selftest.mjs",
+    "install:fnmonitor": "bash scripts/install-fnmonitor.sh"
   },
   "files": [
     "server.js",

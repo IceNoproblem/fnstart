@@ -25,156 +25,82 @@ fnStart 干的事很简单：**把这些散落的入口，收成一页。**
 
 ---
 
-## 部署之前，先说清楚一件事
+## 装它
 
-fnStart 不是"一个容器解决一切"。**完整功能需要两块拼图**：
+**前提**：能 SSH 登录 NAS。飞牛里打开「设置 → 系统设置 → SSH」就行。
 
-| 拼图 | 是什么 | 怎么来 |
-|---|---|---|
-| **① 飞牛监控 fnMonitor** | 一个**第三方开源应用**（作者 MisiteQ，MIT），装在 `/vol1/@appcenter/fnmonitor`，提供 `/api/overview` 实时数据，监听 **8777** | 见下方「第 0 步」，两分钟装好 |
-| **② fnStart** | 本项目，一个 Node 容器，提供这一页 | `docker compose up -d` |
-
-### 关于 fnMonitor，得说实话
-
-- 它**不是飞牛系统自带的**，也不在飞牛应用中心的默认源里。它是飞牛玩家 **Misite齊（GitHub [@MisiteQ](https://github.com/MisiteQ)）** 写的一个第三方开源应用（MIT），仓库在 <https://github.com/MisiteQ/fnmonitor>。
-- 它**不是 Docker 镜像**，是一个 FPK 应用包，所以没法写进 `docker-compose.yml` 跟着一起 `up`。得单独装（第 0 步）。
-- 本项目**不分发、不修改、不打包** fnMonitor 的任何代码。我们只是用 HTTP 去读它自己对外提供的 `/api/overview` 接口——和你用浏览器打开它的页面看到的是同一份数据。
-- 如果哪天它的接口变了导致面板空掉，那是本项目的锅，请来这边提 issue；但如果是 fnMonitor 本身的问题，请去[它的仓库](https://github.com/MisiteQ/fnmonitor)反馈。
-- **没装 fnMonitor 也能用**。只是右侧面板会显示"读不到监控数据"，其余功能（卡片、书签、搜索、天气、时钟）一切正常。
-
----
-
-## 部署流程
-
-### 第 0 步：装飞牛监控（想要监控面板就必做）
-
-它不是商店自带的应用，得你自己装。三种方式，从最省事的往下选。
-
-**方式一：一条命令（推荐）**
+### 1 · 粘这一块
 
 ```bash
-# 如果还没把仓库放到 NAS 上，先来这一行
 git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
+cd /vol1/docker/fnstart
+sudo bash scripts/install.sh
+```
 
+看到 `✓ 装好了` 就成了。它会打印**访问地址**和**访问令牌**——令牌只显示这一次，抄进密码管理器。
+
+<sub>第一行拉不动（国内常见）：把 `https://github.com/` 换成 `https://ghfast.top/https://github.com/`。</sub>
+<sub>令牌会不会过期、忘了怎么找回、怎么换一把：[访问令牌的一生](#访问令牌的一生)。</sub>
+
+### 2 · 打开
+
+浏览器输入 `http://你的NAS地址:3721`，粘令牌，进去。
+
+<sub>想设成浏览器首页：Chrome / Edge → 设置 → 启动时 → 打开特定网页。</sub>
+
+### 3 · 想要右边那块监控面板？再跑一条
+
+```bash
 sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 ```
 
-脚本干的事：认 CPU 架构 → 查上游最新版 → 下载对应 FPK → 调 `appcenter-cli` 装 → 等 8777 起来。**已经是装好的机器会直接跳过**，重复跑没有副作用。
+数据来自 **飞牛监控 fnMonitor**，第三方开源应用（作者 [MisiteQ](https://github.com/MisiteQ)，MIT 许可，[仓库](https://github.com/MisiteQ/fnmonitor)）。**不是飞牛自带的**，不在应用中心默认源里。不装也能用，只是右侧面板空着。
 
-国内拉 GitHub 慢，加个加速前缀：
+### 装不上？
 
-```bash
-sudo GH_PROXY=https://ghfast.top/ bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
-```
+| 卡在哪 | 怎么办 |
+|---|---|
+| 页面打不开 | `docker logs fnstart --tail 20`，看最后一行 |
+| 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，改用下面「其它装法 → docker run」 |
+| 忘了令牌 | `grep ACCESS_TOKEN /vol1/docker/fnstart/.env` |
+| 右侧读不到监控 | `curl http://你的NAS地址:8777/api/overview`；不通就是第 3 步没做 |
+| 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
-**方式二：FnDepot 应用源（能一键升级）**
+<details>
+<summary><b>其它装法</b> — 手动 compose / docker run / 不用 Docker / 飞牛图形界面</summary>
 
-1. 在飞牛上装 [FnDepot](https://github.com/MisiteQ/FnDepot) 客户端
-2. 添加应用源 `https://github.com/MisiteQ/FnDepot`
-3. 搜索「飞牛监控」/ fnmonitor，安装
-
-**方式三：手动装 FPK**
-
-1. 去 <https://github.com/MisiteQ/fnmonitor/releases> 下载对应架构的 `.fpk`（x86 / ARM 别下错）
-2. 飞牛「应用中心 → 手动安装」选这个文件
-3. 如果手动安装入口是灰的，SSH 里执行 `appcenter-cli manual-install enable` 打开它
-
-装完验证一下（下面 fnStart 读的就是这个接口）：
+**手动 compose**（不想用安装脚本）
 
 ```bash
-curl http://你的NAS地址:8777/api/overview | head -c 200
-# 应该吐出一大坨 JSON；如果超时或 404，先解决这一步
-```
-
-### 第 1 步：部署 fnStart
-
-三种方式，挑一种。
-
-#### 方式 A：docker compose（推荐）
-
-```bash
-# 1. 把源码放到 NAS 上（飞牛自带 git；没有就在电脑上下载 zip 再传上去）
-git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
 cd /vol1/docker/fnstart
-
-# 2.（可选，但只要端口能被别人访问就该做）生成访问令牌，写进 .env
 ./scripts/new-token.sh --write
-
-# 3. 起容器（首次会构建一个基于 node:22-alpine 的小镜像）
 docker compose up -d --build
 ```
 
-`.env` 是从 `.env.example` 复制来的，里面放 `ACCESS_TOKEN` 之类的私密配置；它已在 `.gitignore` 里，不会被提交。跳过第 2 步也能跑，只是没有访问保护 —— 详见下面的[访问令牌的一生](#访问令牌的一生)。
-
-也可以把仓库里的 `docker-compose.yml` 贴进飞牛的「Docker → 项目 → 新建」，项目路径填 `/vol1/docker/fnstart`（目录里要有源码，因为镜像是从这份源码构建的）。
-
-> 构建那一步如果卡住，多半是 NAS 的镜像加速源拉不到 `node:22-alpine`，不影响使用——直接跳到下面的**方式 B**，用官方镜像挂载源码跑，一样的效果。
-
-#### 方式 B：docker run 一行流
+**docker run 一行流**（镜像拉不到时用这个）
 
 ```bash
-docker run -d --name fnstart \
-  --network host \
-  --restart unless-stopped \
+docker run -d --name fnstart --network host --restart unless-stopped \
   --cap-add=SYS_PTRACE \
-  -v /vol1/docker/fnstart:/app:ro \
-  -v /vol1/docker/fnstart/data:/data \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /proc:/host/proc:ro \
+  -v /vol1/docker/fnstart:/app -v /vol1/docker/fnstart/data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro -v /proc:/host/proc:ro \
   -w /app -e PORT=3721 -e DATA_DIR=/data \
+  -e ACCESS_TOKEN=你的令牌 \
   node:22-alpine node server.js
 ```
 
-（`node:22-alpine` 是官方镜像，不需要本地构建。想自己构建就把 `node:22-alpine node server.js` 换成 `fnstart:latest`，先 `docker build -t fnstart .`。）
+令牌用 `./scripts/new-token.sh` 生成；不写 `-e ACCESS_TOKEN` 就是无鉴权。
 
-要开访问保护，在 `-w /app -e PORT=3721` 后面补一段 `-e ACCESS_TOKEN=你的令牌`（令牌用 `./scripts/new-token.sh` 生成）。
-
-#### 方式 C：不用 Docker
-
-有 Node 22 就行：
+**不用 Docker**（有 Node 22 就行）
 
 ```bash
-git clone https://github.com/IceNoproblem/fnstart.git
-cd fnstart
+git clone https://github.com/IceNoproblem/fnstart.git && cd fnstart
 PORT=3721 DATA_DIR=./data node server.js
 ```
 
-（这样跑照样能扫端口，但读不到 Docker socket，容器名会退化——不影响使用。）
+**飞牛图形界面** — 把 `docker-compose.yml` 贴进「Docker → 项目 → 新建」，项目路径填 `/vol1/docker/fnstart`。该目录里要有源码，镜像是从源码构建的。
 
-### 第 2 步：打开它，并设成浏览器首页
-
-访问 `http://你的NAS地址:3721`，看到卡片就成功了。
-
-设成首页：
-
-- **Chrome / Edge**：设置 → 启动时 → 打开特定网页 → 填 `http://你的NAS地址:3721`
-- **Safari**：偏好设置 → 通用 → 主页
-- 想连"新建标签页"也变成它，装个 *New Tab Redirect* 之类的扩展指过去
-
-右上角那个**四角箭头**是全屏按钮，点了之后浏览器的标签栏、地址栏、菜单栏全部隐藏，只剩内容。Windows 和 macOS 都吃这一套——它走的是浏览器标准的 Fullscreen API，不是给 Mac 开后门。想退出按 `Esc` 或再点一次。
-
-### 第 3 步：确认一下
-
-```bash
-docker logs fnstart --tail 20
-```
-
-看到这几行就算齐活：
-
-```
-[fnstart] 已启动 → http://0.0.0.0:3721
-[fnstart] 数据目录 /data
-[fnstart] Docker socket /var/run/docker.sock
-[fnstart] 飞牛监控已连接 → http://127.0.0.1:8777/api/overview
-```
-
-最后一行如果变成"没连上飞牛监控"，那就是第 0 步没做完，回到上面重来。
-
-想更彻底地体检，用自带的自检脚本（会自己清理测试数据，不会打乱你的卡片）：
-
-```bash
-docker exec fnstart node /app/scripts/selftest.mjs
-```
+</details>
 
 ---
 
@@ -317,6 +243,90 @@ echo "ACCESS_TOKEN=粘到这里" >> .env
 
 ---
 
+### 前面再套一层 HTTPS + 密码
+
+令牌走明文 HTTP 等于没设，务必套一层带 TLS 的反向代理。Caddy 两条就够：
+
+```
+start.example.com {
+  basic_auth {
+    you <用 caddy hash-password 生成的 bcrypt 串>
+  }
+  reverse_proxy 127.0.0.1:3721
+}
+```
+
+Nginx 版本：
+
+```nginx
+location / {
+  auth_basic "fnStart";
+  auth_basic_user_file /etc/nginx/.htpasswd;
+  proxy_pass http://127.0.0.1:3721;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  # 监控面板内嵌模式要转发 WebSocket
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 300s;
+}
+```
+
+### 仍然建议：优先用组网，不要暴露端口
+
+Tailscale / WireGuard 组网之后，出门也能直接开 `http://100.x.x.x:3721`，端口根本不出公网：上面所有问题一次性消失，还自带加密与身份认证。代价只是每台设备装个客户端。
+
+### 还有两件和安全无关、但会先绊住你的事
+
+- 家宽的 80/443 常被运营商封，高位端口（如 3721）一般能通；公网 IP 会变，需要 DDNS
+- 个人宽带对外提供服务，各地对备案的要求不一样，自己留意
+
+---
+
+## 常见问题
+
+**为什么不把 fnMonitor 一起写进 docker-compose，一条命令全起来？**
+
+问得好，我先试过这条路，但放弃了。原因不是懒，是它压根不是"容器型"应用——fnMonitor 是个**宿主机监控代理**，它的工作就是去摸硬件：
+
+- 调外部命令：`smartctl`（硬盘 SMART）、`storcli`/`perccli`（RAID 阵列卡）、`sensors`（温度风扇）、`ipmitool`（BMC）、`hdparm`、`lscpu`、`dmidecode`、`nvidia-smi`
+- 读系统路径：`/sys/class/hwmon`（传感器）、`/sys/block`、`/proc/{cpuinfo,stat,meminfo,mounts}`、`/dev/sd*`
+- 还有更狠的：`/dev/port` —— 直接读 I/O 端口，用来兼容 NEC / 联想商用机那种走私有 EC 邮箱的风扇
+
+要把它塞进容器，就得 `privileged: true`、挂 `/sys` `/dev` `/proc` `/var/apps` `/vol1/@appcenter` `/usr/trim`，再在镜像里装齐上面那堆系统工具。**这等于把整台 NAS 交给一个容器**，比装个 FPK 危险得多；顺带还会丢掉桌面图标和飞牛应用中心的升级管理，并且要跟着上游一天几版的迭代不停改我们的 compose。
+
+所以这一版的分工是：**fnMonitor 用它的方式装（一条命令），fnStart 用容器跑，两边只通过 `:8777/api/overview` 这个 HTTP 接口说话。** 谁升级都不影响谁。
+
+**右侧面板一直是"读不到监控数据"？**
+第 3 步没做，或者 8777 不通。`curl http://你的NAS:8777/api/overview` 试一下。用反代/HTTPS 的话，把 `MONITOR_URL` 显式写死。
+
+**只扫出来一半服务？**
+大概率是 host 网络容器没认领到名字，不是没发现。看看扫描结果里的端口数对不对；想认领名字就加上 `SYS_PTRACE` 和 `/proc` 挂载。另外 `PROBE_TIMEOUT` 太小会把慢服务漏掉，调到 3000 试试。
+
+**卡片地址变成了 `127.0.0.1`？**
+说明你是从 NAS 本机用 `127.0.0.1` 打开的。程序会自动换成局域网 IP，但如果机器有多个网卡可能挑错，这种时候设 `PUBLIC_HOST=192.168.x.x`。
+
+**天气显示 `--`？**
+天气走 open-meteo，需要外网。墙内偶尔抽风，失败时会退回上次成功的快照（6 小时内有效），所以一般只会短暂显示旧数据。
+
+**能不能放到公网？**
+默认**不行**——不设 `ACCESS_TOKEN` 时它没有任何鉴权，任何能访问到端口的人都能改卡片、读监控、导出整份备份。一定要外网访问，请先读完下面那节【暴露到公网之前】。
+
+**令牌会自己变吗？30 天后要重新生成吗？**
+都不会。令牌是你自己设的死值，程序不会自动生成、也不会自动更换 —— 到期的是**登录 cookie**（30 天），不是令牌。第 31 天看到登录页，把同一串令牌再贴一次就行。而且 cookie 是滑动续期，只要期间打开过主页就一直顺延，正常使用基本碰不到它。完整流程见[访问令牌的一生](#访问令牌的一生)。
+
+**忘了令牌怎么办？**
+`grep ACCESS_TOKEN .env`；`.env` 也没了就读容器环境变量：`docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ACCESS_TOKEN`。都找不到就换一把新的，卡片数据不受影响。
+
+**改了设置为什么不生效？**
+`data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。
+
+**会往外发我的数据吗？**
+不会。唯一的对外请求是天气（open-meteo，只发城市名和坐标）。没有统计、没有遥测、没有回连。
+
+---
+
 ## 访问令牌的一生
 
 这一段是给「从仓库克隆、自己部署」的人看的。四件事说清楚：令牌从哪来、怎么用、什么时候续、忘了怎么办。
@@ -396,88 +406,6 @@ docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | gr
 ### 如果不止你一个人用
 
 那不建议把令牌发给对方 —— 它是管理员权限，对方能删你的卡片、导出你的备份。正确做法是把认证放在反向代理层（Caddy `basic_auth`、Nginx `auth_basic`、或者雷池 WAF 的「身份认证」），每个人的账号密码由那一层管，fnStart 的令牌只属于你自己。这样谁进来看得见、谁能进，也都有日志。
-
-### 前面再套一层 HTTPS + 密码
-
-令牌走明文 HTTP 等于没设，务必套一层带 TLS 的反向代理。Caddy 两条就够：
-
-```
-start.example.com {
-  basic_auth {
-    you <用 caddy hash-password 生成的 bcrypt 串>
-  }
-  reverse_proxy 127.0.0.1:3721
-}
-```
-
-Nginx 版本：
-
-```nginx
-location / {
-  auth_basic "fnStart";
-  auth_basic_user_file /etc/nginx/.htpasswd;
-  proxy_pass http://127.0.0.1:3721;
-  proxy_set_header Host $host;
-  proxy_set_header X-Real-IP $remote_addr;
-  # 监控面板内嵌模式要转发 WebSocket
-  proxy_http_version 1.1;
-  proxy_set_header Upgrade $http_upgrade;
-  proxy_set_header Connection "upgrade";
-  proxy_read_timeout 300s;
-}
-```
-
-### 仍然建议：优先用组网，不要暴露端口
-
-Tailscale / WireGuard 组网之后，出门也能直接开 `http://100.x.x.x:3721`，端口根本不出公网：上面所有问题一次性消失，还自带加密与身份认证。代价只是每台设备装个客户端。
-
-### 还有两件和安全无关、但会先绊住你的事
-
-- 家宽的 80/443 常被运营商封，高位端口（如 3721）一般能通；公网 IP 会变，需要 DDNS
-- 个人宽带对外提供服务，各地对备案的要求不一样，自己留意
-
----
-
-## 常见问题
-
-**为什么不把 fnMonitor 一起写进 docker-compose，一条命令全起来？**
-
-问得好，我先试过这条路，但放弃了。原因不是懒，是它压根不是"容器型"应用——fnMonitor 是个**宿主机监控代理**，它的工作就是去摸硬件：
-
-- 调外部命令：`smartctl`（硬盘 SMART）、`storcli`/`perccli`（RAID 阵列卡）、`sensors`（温度风扇）、`ipmitool`（BMC）、`hdparm`、`lscpu`、`dmidecode`、`nvidia-smi`
-- 读系统路径：`/sys/class/hwmon`（传感器）、`/sys/block`、`/proc/{cpuinfo,stat,meminfo,mounts}`、`/dev/sd*`
-- 还有更狠的：`/dev/port` —— 直接读 I/O 端口，用来兼容 NEC / 联想商用机那种走私有 EC 邮箱的风扇
-
-要把它塞进容器，就得 `privileged: true`、挂 `/sys` `/dev` `/proc` `/var/apps` `/vol1/@appcenter` `/usr/trim`，再在镜像里装齐上面那堆系统工具。**这等于把整台 NAS 交给一个容器**，比装个 FPK 危险得多；顺带还会丢掉桌面图标和飞牛应用中心的升级管理，并且要跟着上游一天几版的迭代不停改我们的 compose。
-
-所以这一版的分工是：**fnMonitor 用它的方式装（一条命令），fnStart 用容器跑，两边只通过 `:8777/api/overview` 这个 HTTP 接口说话。** 谁升级都不影响谁。
-
-**右侧面板一直是"读不到监控数据"？**
-第 0 步没做，或者 8777 不通。`curl http://你的NAS:8777/api/overview` 试一下。用反代/HTTPS 的话，把 `MONITOR_URL` 显式写死。
-
-**只扫出来一半服务？**
-大概率是 host 网络容器没认领到名字，不是没发现。看看扫描结果里的端口数对不对；想认领名字就加上 `SYS_PTRACE` 和 `/proc` 挂载。另外 `PROBE_TIMEOUT` 太小会把慢服务漏掉，调到 3000 试试。
-
-**卡片地址变成了 `127.0.0.1`？**
-说明你是从 NAS 本机用 `127.0.0.1` 打开的。程序会自动换成局域网 IP，但如果机器有多个网卡可能挑错，这种时候设 `PUBLIC_HOST=192.168.x.x`。
-
-**天气显示 `--`？**
-天气走 open-meteo，需要外网。墙内偶尔抽风，失败时会退回上次成功的快照（6 小时内有效），所以一般只会短暂显示旧数据。
-
-**能不能放到公网？**
-默认**不行**——不设 `ACCESS_TOKEN` 时它没有任何鉴权，任何能访问到端口的人都能改卡片、读监控、导出整份备份。一定要外网访问，请先读完下面那节【暴露到公网之前】。
-
-**令牌会自己变吗？30 天后要重新生成吗？**
-都不会。令牌是你自己设的死值，程序不会自动生成、也不会自动更换 —— 到期的是**登录 cookie**（30 天），不是令牌。第 31 天看到登录页，把同一串令牌再贴一次就行。而且 cookie 是滑动续期，只要期间打开过主页就一直顺延，正常使用基本碰不到它。完整流程见[访问令牌的一生](#访问令牌的一生)。
-
-**忘了令牌怎么办？**
-`grep ACCESS_TOKEN .env`；`.env` 也没了就读容器环境变量：`docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ACCESS_TOKEN`。都找不到就换一把新的，卡片数据不受影响。
-
-**改了设置为什么不生效？**
-`data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。
-
-**会往外发我的数据吗？**
-不会。唯一的对外请求是天气（open-meteo，只发城市名和坐标）。没有统计、没有遥测、没有回连。
 
 ---
 

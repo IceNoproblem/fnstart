@@ -380,6 +380,17 @@ async function authTests() {
     return `→ ${loc}`;
   });
 
+  await test('健康检查免鉴权', async () => {
+    // Docker 的 HEALTHCHECK 拿不到令牌，探活这条路必须放行，否则容器永远 unhealthy。
+    // 但它只能回一个 ok —— 顺手确认没把数据漏出去。
+    const r = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(10000) });
+    need(r.status === 200, `状态码 ${r.status}，期望 200`);
+    const body = await r.text();
+    need(!/cards|bookmark|settings/i.test(body), `响应里带了数据：${body.slice(0, 80)}`);
+    need(body.length < 200, `响应体太长，可能不是纯探活：${body.slice(0, 80)}`);
+    return body.trim();
+  });
+
   await test('错误令牌被拒', async () => {
     const r = await fetch(`${BASE}/?token=definitely-wrong`, {
       redirect: 'manual',

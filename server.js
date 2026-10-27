@@ -517,6 +517,15 @@ const server = http.createServer(async (req, res) => {
       return html(res, 401, loginPage('令牌不对，再试一次'));
     }
 
+    /*
+     * 容器健康检查专用，必须放在鉴权之前。
+     * Docker 的 HEALTHCHECK 拿不到访问令牌，探 /api/state 永远 401，
+     * 容器就会一直标 unhealthy —— 1.3.0 之前一直有这个问题，只是之前用
+     * node:22-alpine 直接跑、没走本项目的 Dockerfile，所以没暴露。
+     * 只回一个 ok，不带任何数据，被扫到也只能知道「这服务活着」。
+     */
+    if (p === '/api/health') return json(res, 200, { ok: true });
+
     if (AUTH_HASH) {
       const how = tokenFromReq(req, url);
       if (!how) {

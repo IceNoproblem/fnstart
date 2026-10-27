@@ -236,6 +236,8 @@ volumes:
 | `PROBE_TIMEOUT` | `2500` | 单个端口探测超时（毫秒），服务多可调到 3000 |
 | `PROBE_CONCURRENCY` | `8` | 探测并发 |
 | `PROBE_PORTS` | 空 | 额外扫描的端口，逗号分隔（拿不到 `/proc` 时的兜底） |
+| `ACCESS_TOKEN` | 空 | **访问令牌**。留空 = 不校验（纯内网用）；一旦打算暴露到公网就必须设 |
+| `BLOCK_PRIVATE_FETCH` | 跟随令牌 | 禁止服务端去抓内网地址的图标（防 SSRF）。设了 `ACCESS_TOKEN` 会自动开启，纯内网想关掉就显式设 `0` |
 
 数据存在 `DATA_DIR` 里：`data.json`（卡片与设置）、`icons/`、`backgrounds/`、`last-monitor.json` / `last-weather.json`（网络抖一下时的兜底快照）。**备份整个目录就等于备份了整个站**，或者访问 `/api/export` 导出一份 JSON。
 
@@ -261,6 +263,75 @@ volumes:
 | GET | `/api/weather` | 天气 |
 | GET | `/api/export` | 导出整份数据 |
 | GET | `/fn/*` | 反向代理到飞牛监控（含 WebSocket） |
+
+---
+
+## 暴露到公网之前
+
+默认状态下 fnStart **不适合直接映射到公网**。我用一个临时实例实测过几条真实可用的攻击路径，不是理论推演：
+
+| 问题 | 实测结果 |
+|---|---|
+| 零鉴权 | `GET /api/state` 直接吐出全部卡片与书签地址（等于一份内网拓扑图）；`/api/export` 直接下载整份备份 |
+| **可变成开放代理** | 匿名 `PATCH /api/settings` 改掉监控地址后，`GET /fn/` 会替你访问内网任意 HTTP 服务并返回内容 —— 实测取回了 qBittorrent 的完整页面 |
+| 上传可存 XSS | 上传含 `<script>` 的 SVG，访问时以 `image/svg+xml` 返回，浏览器会执行（同源） |
+| 图标抓取可被利用 | `/api/icon/fetch` 会让服务器替你请求任意地址，可用来盲探内网端口 |
+
+### 设一个令牌（最低要求）
+
+```yaml
+# docker-compose.yml
+environment:
+  ACCESS_TOKEN: 换成一串你自己的随机字符串
+```
+
+设了之后：
+
+- 浏览器访问会看到一张登录页，输入令牌即可（写入 httpOnly cookie，30 天有效，存的是令牌的 sha256 而不是令牌本身）
+- 脚本用 `Authorization: Bearer <token>`，或者一次性链接 `?token=xxx`（验证后自动转 cookie 并抹掉地址栏里的参数）
+- **顺手关掉两个洞**：`/fn/` 代理只认启动时的 `MONITOR_URL`/`MONITOR_PORT`，设置里改监控地址不再影响服务端请求（开放代理失效）；`/api/icon/fetch` 禁止抓内网与环回地址
+- 上传限制到单张 2MB、目录总量 200MB；SVG 会做内容清洗，并在响应头加 `Content-Security-Policy: default-src 'none'`（脚本、事件属性全部失效）
+
+不设令牌时以上保护不启用（`BLOCK_PRIVATE_FETCH` 除外可单独设），行为和以前完全一样 —— 内网照常用，不会因为这次加固少任何功能。
+
+### 前面再套一层 HTTPS + 密码
+
+令牌走明文 HTTP 等于没设，务必套一层带 TLS 的反向代理。Caddy 两条就够：
+
+```
+start.example.com {
+  basic_auth {
+    you <用 caddy hash-password 生成的 bcrypt 串>
+  }
+  reverse_proxy 127.0.0.1:3721
+}
+```
+
+Nginx 版本：
+
+```nginx
+location / {
+  auth_basic "fnStart";
+  auth_basic_user_file /etc/nginx/.htpasswd;
+  proxy_pass http://127.0.0.1:3721;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  # 监控面板内嵌模式要转发 WebSocket
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  proxy_read_timeout 300s;
+}
+```
+
+### 仍然建议：优先用组网，不要暴露端口
+
+Tailscale / WireGuard 组网之后，出门也能直接开 `http://100.x.x.x:3721`，端口根本不出公网：上面所有问题一次性消失，还自带加密与身份认证。代价只是每台设备装个客户端。
+
+### 还有两件和安全无关、但会先绊住你的事
+
+- 家宽的 80/443 常被运营商封，高位端口（如 3721）一般能通；公网 IP 会变，需要 DDNS
+- 个人宽带对外提供服务，各地对备案的要求不一样，自己留意
 
 ---
 
@@ -291,7 +362,7 @@ volumes:
 天气走 open-meteo，需要外网。墙内偶尔抽风，失败时会退回上次成功的快照（6 小时内有效），所以一般只会短暂显示旧数据。
 
 **能不能放到公网？**
-**别。** 这个项目**没有任何登录鉴权**，任何能访问到端口的人都能改你的卡片、读你的监控数据。它是给内网用的。真要外网访问，套一层带认证的反向代理。
+默认**不行**——不设 `ACCESS_TOKEN` 时它没有任何鉴权，任何能访问到端口的人都能改卡片、读监控、导出整份备份。一定要外网访问，请先读完下面那节【暴露到公网之前】。
 
 **改了设置为什么不生效？**
 `data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。

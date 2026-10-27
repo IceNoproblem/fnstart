@@ -12,6 +12,8 @@
  */
 
 const BASE = (process.env.BASE || 'http://127.0.0.1:3721').replace(/\/+$/, '');
+/** 设了 ACCESS_TOKEN 的实例，自检也要带令牌（否则全是 401） */
+const TOKEN = process.env.ACCESS_TOKEN || '';
 const NO_WRITE = process.argv.includes('--no-write');
 const SKIP_UPLOAD = process.argv.includes('--skip-upload') || NO_WRITE;
 
@@ -39,9 +41,12 @@ async function test(name, fn) {
 }
 
 async function req(path, { method = 'GET', body, raw = false } = {}) {
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
   const res = await fetch(BASE + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(60000),
   });
@@ -64,7 +69,10 @@ const need = (cond, msg) => {
 async function staticTests() {
   console.log('\n静态资源');
   await test('首页返回 200 且是 HTML', async () => {
-    const r = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(15000) });
+    const r = await fetch(`${BASE}/`, {
+      headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
+      signal: AbortSignal.timeout(15000),
+    });
     need(r.status === 200, `状态码 ${r.status}`);
     const html = await r.text();
     need(/<title>/.test(html), '没有 title');
@@ -73,7 +81,7 @@ async function staticTests() {
   });
 
   await test('关键 DOM 节点齐全', async () => {
-    const html = await (await fetch(`${BASE}/`)).text();
+    const html = await (await fetch(`${BASE}/`, { headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {} })).text();
     const ids = ['q', 'searchForm', 'boards', 'monitor', 'monPanel', 'settingsBtn', 'fullBtn', 'dateChip', 'clockChip', 'wxChip'];
     const miss = ids.filter((id) => !html.includes(`id="${id}"`));
     need(!miss.length, `缺少 ${miss.join(',')}`);

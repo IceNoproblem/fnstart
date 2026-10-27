@@ -97,9 +97,14 @@ curl http://你的NAS地址:8777/api/overview | head -c 200
 git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
 cd /vol1/docker/fnstart
 
-# 2. 起容器（首次会构建一个基于 node:22-alpine 的小镜像）
+# 2.（可选，但只要端口能被别人访问就该做）生成访问令牌，写进 .env
+./scripts/new-token.sh --write
+
+# 3. 起容器（首次会构建一个基于 node:22-alpine 的小镜像）
 docker compose up -d --build
 ```
+
+`.env` 是从 `.env.example` 复制来的，里面放 `ACCESS_TOKEN` 之类的私密配置；它已在 `.gitignore` 里，不会被提交。跳过第 2 步也能跑，只是没有访问保护 —— 详见下面的[访问令牌的一生](#访问令牌的一生)。
 
 也可以把仓库里的 `docker-compose.yml` 贴进飞牛的「Docker → 项目 → 新建」，项目路径填 `/vol1/docker/fnstart`（目录里要有源码，因为镜像是从这份源码构建的）。
 
@@ -121,6 +126,8 @@ docker run -d --name fnstart \
 ```
 
 （`node:22-alpine` 是官方镜像，不需要本地构建。想自己构建就把 `node:22-alpine node server.js` 换成 `fnstart:latest`，先 `docker build -t fnstart .`。）
+
+要开访问保护，在 `-w /app -e PORT=3721` 后面补一段 `-e ACCESS_TOKEN=你的令牌`（令牌用 `./scripts/new-token.sh` 生成）。
 
 #### 方式 C：不用 Docker
 
@@ -236,7 +243,7 @@ volumes:
 | `PROBE_TIMEOUT` | `2500` | 单个端口探测超时（毫秒），服务多可调到 3000 |
 | `PROBE_CONCURRENCY` | `8` | 探测并发 |
 | `PROBE_PORTS` | 空 | 额外扫描的端口，逗号分隔（拿不到 `/proc` 时的兜底） |
-| `ACCESS_TOKEN` | 空 | **访问令牌**。留空 = 不校验（纯内网用）；一旦打算暴露到公网就必须设 |
+| `ACCESS_TOKEN` | 空 | **访问令牌**。留空 = 不校验（纯内网用）；一旦打算暴露到公网就必须设。用 `./scripts/new-token.sh --write` 生成，写在 `.env` 里，别写进 compose。详见[访问令牌的一生](#访问令牌的一生) |
 | `BLOCK_PRIVATE_FETCH` | 跟随令牌 | 禁止服务端去抓内网地址的图标（防 SSRF）。设了 `ACCESS_TOKEN` 会自动开启，纯内网想关掉就显式设 `0` |
 
 数据存在 `DATA_DIR` 里：`data.json`（卡片与设置）、`icons/`、`backgrounds/`、`last-monitor.json` / `last-weather.json`（网络抖一下时的兜底快照）。**备份整个目录就等于备份了整个站**，或者访问 `/api/export` 导出一份 JSON。
@@ -279,10 +286,22 @@ volumes:
 
 ### 设一个令牌（最低要求）
 
-```yaml
-# docker-compose.yml
-environment:
-  ACCESS_TOKEN: 换成一串你自己的随机字符串
+```bash
+# 在项目目录里，一条命令生成并写进 .env
+./scripts/new-token.sh --write
+```
+
+它会打印新令牌、写进 `.env`（权限 600，已在 `.gitignore` 里，不会进仓库），然后：
+
+```bash
+docker compose up -d
+```
+
+不想用脚本就自己生成，效果一样：
+
+```bash
+openssl rand -hex 16        # 32 个十六进制字符
+echo "ACCESS_TOKEN=粘到这里" >> .env
 ```
 
 设了之后：
@@ -295,6 +314,88 @@ environment:
 - 登录连续失败会逐步变慢（400ms → 5s），脚本爆破没有意义
 
 不设令牌时以上保护不启用（`BLOCK_PRIVATE_FETCH` 除外可单独设），行为和以前完全一样 —— 内网照常用，不会因为这次加固少任何功能。
+
+---
+
+## 访问令牌的一生
+
+这一段是给「从仓库克隆、自己部署」的人看的。四件事说清楚：令牌从哪来、怎么用、什么时候续、忘了怎么办。
+
+先纠正最容易混的一对概念 —— 这两个东西经常被当成一个：
+
+| | 访问令牌 | 登录 cookie |
+|---|---|---|
+| 是什么 | 你在 `.env` 里设的那串字符 | 登录成功后浏览器保存的凭证 |
+| 谁生成 | **你**，手动生成，之后一直不变 | 服务端签发，值 = 令牌的 sha256 |
+| 会过期吗 | **不会**。除非你去改 `.env`，否则永远有效 | **30 天不活动就失效** |
+| 存在哪 | `.env`、你的密码管理器 | 浏览器 cookie，`fnstart_auth` |
+| 能干嘛 | 等于管理员权限：改卡片、导备份、看监控 | 同上（它是令牌的等价凭证） |
+
+所以：**令牌不会自动生成，也不会自动更新；到期的是 cookie。** 第 31 天你看到的登录页，只需要把同一串令牌再贴一次，不用重新生成。
+
+### 第 1 步：生成
+
+```bash
+./scripts/new-token.sh --write      # 生成 32 位十六进制，写进 .env
+./scripts/new-token.sh --write 32   # 想要 64 位就传 32（单位是字节）
+```
+
+生成完立刻抄进密码管理器（1Password / Bitwarden / macOS 钥匙串都行）。**这一步别偷懒** —— 令牌只存在于两个地方：`.env` 和你的记忆。丢了就得换一把。
+
+为什么不「首次启动自动生成」？因为隐式生成的密码最容易丢：它躺在某段日志或某个容器环境变量里，谁也没记住，换机器就找不回来。显式生成、当场抄走，反而最稳。
+
+### 第 2 步：首次登录
+
+浏览器打开 `http://你的地址:3721`，贴令牌，进入。之后 cookie 记 30 天。
+
+手机上不想手打那一长串，就用一次性链接：
+
+```
+http://你的地址:3721/?token=那串令牌
+```
+
+打开后服务端会立刻换发 cookie 并 303 跳回干净地址，地址栏里的令牌随即消失。**但链接本身还是带着令牌** —— 它会留在浏览器历史、聊天记录、反代访问日志里。所以只在自己的设备之间传，别发到群里。
+
+### 第 3 步：续期（不用你管）
+
+cookie 是**滑动续期**：每次打开主页就把 30 天重新算起。你天天用就永远不会掉；出差两周回来打开，还在；真正闲置超过 30 天才需要重登一次 —— 而重登也只是把同一串令牌再贴一次。
+
+服务端只在「打开页面」时重发 cookie，静态资源和接口不重发，所以不会每个图标都背一个 `Set-Cookie`。
+
+### 第 4 步：换令牌 / 把某台设备踢下线
+
+没有「单独吊销某台设备」的功能。要踢人（比如手机丢了），就**换一把令牌**：
+
+```bash
+./scripts/new-token.sh --write   # 生成新的，覆盖 .env
+docker compose up -d             # 重建容器，让新令牌生效
+```
+
+容器重建后 `AUTH_HASH` 变了，**所有已登录设备的 cookie 立刻全部失效**，包括你自己的。这是目前唯一的吊销手段，也是它足够简单的原因：一个令牌、一个开关。
+
+注意 `docker restart` 不够 —— 环境变量不会重读，必须 `up -d` 重建容器。
+
+### 忘了令牌怎么办
+
+令牌没有后门、没有找回邮件，但它就写在你的 `.env` 里：
+
+```bash
+grep ACCESS_TOKEN .env
+```
+
+`.env` 也丢了的话，从运行中的容器里读（这是令牌唯一还会留下的地方）：
+
+```bash
+docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ACCESS_TOKEN
+```
+
+两处都找不到，就只能换一把新的（回到第 4 步）。数据不会丢 —— 卡片在 `data/` 里，跟令牌无关。
+
+顺带一提：启动日志只会报「已开启（令牌 N 位）」，**永远不会打印令牌本身**。因为 `docker logs` 是很多人会随手贴到群里求助的东西。
+
+### 如果不止你一个人用
+
+那不建议把令牌发给对方 —— 它是管理员权限，对方能删你的卡片、导出你的备份。正确做法是把认证放在反向代理层（Caddy `basic_auth`、Nginx `auth_basic`、或者雷池 WAF 的「身份认证」），每个人的账号密码由那一层管，fnStart 的令牌只属于你自己。这样谁进来看得见、谁能进，也都有日志。
 
 ### 前面再套一层 HTTPS + 密码
 
@@ -365,6 +466,12 @@ Tailscale / WireGuard 组网之后，出门也能直接开 `http://100.x.x.x:372
 
 **能不能放到公网？**
 默认**不行**——不设 `ACCESS_TOKEN` 时它没有任何鉴权，任何能访问到端口的人都能改卡片、读监控、导出整份备份。一定要外网访问，请先读完下面那节【暴露到公网之前】。
+
+**令牌会自己变吗？30 天后要重新生成吗？**
+都不会。令牌是你自己设的死值，程序不会自动生成、也不会自动更换 —— 到期的是**登录 cookie**（30 天），不是令牌。第 31 天看到登录页，把同一串令牌再贴一次就行。而且 cookie 是滑动续期，只要期间打开过主页就一直顺延，正常使用基本碰不到它。完整流程见[访问令牌的一生](#访问令牌的一生)。
+
+**忘了令牌怎么办？**
+`grep ACCESS_TOKEN .env`；`.env` 也没了就读容器环境变量：`docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ACCESS_TOKEN`。都找不到就换一把新的，卡片数据不受影响。
 
 **改了设置为什么不生效？**
 `data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。

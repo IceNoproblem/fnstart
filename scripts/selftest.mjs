@@ -11,19 +11,28 @@
  *   node scripts/selftest.mjs --skip-upload        # 跳过上传测试（会在数据目录留图标）
  */
 
+import crypto from 'node:crypto';
+
 const BASE = (process.env.BASE || 'http://127.0.0.1:3721').replace(/\/+$/, '');
 /** 设了 ACCESS_TOKEN 的实例，自检也要带令牌（否则全是 401） */
 const TOKEN = process.env.ACCESS_TOKEN || '';
 const NO_WRITE = process.argv.includes('--no-write');
 const SKIP_UPLOAD = process.argv.includes('--skip-upload') || NO_WRITE;
 
+const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 let pass = 0;
 const fails = [];
+const skips = [];
 const t0 = Date.now();
 
 const ok = (name, extra = '') => {
   pass++;
   console.log(`  \x1b[32m✓\x1b[0m ${name}${extra ? ` \x1b[2m${extra}\x1b[0m` : ''}`);
+};
+/** 条件不满足时明说跳过，不冒充通过 */
+const skip = (name, why) => {
+  skips.push(name);
+  console.log(`  \x1b[33m—\x1b[0m ${name} \x1b[2m跳过：${why}\x1b[0m`);
 };
 const bad = (name, err) => {
   fails.push({ name, err: String(err && err.message ? err.message : err) });
@@ -319,6 +328,68 @@ async function dataTests() {
   });
 }
 
+/* ---------- 0. 访问控制 ---------- */
+async function authTests() {
+  console.log('\n访问控制');
+  if (!TOKEN) {
+    skip('未带令牌应被拒', '实例没设 ACCESS_TOKEN（--no-write 之外的写测试也按裸奔跑）');
+    skip('cookie 登录与滑动续期', '没有令牌可算 cookie');
+    skip('?token= 一次性链接', '没有令牌可拼链接');
+    return;
+  }
+
+  await test('未带令牌应被拒', async () => {
+    const r = await fetch(`${BASE}/api/state`, { signal: AbortSignal.timeout(10000) });
+    need(r.status === 401, `状态码 ${r.status}，期望 401`);
+    return '401';
+  });
+
+  await test('cookie 登录与滑动续期', async () => {
+    // cookie 里存的是令牌的 sha256，服务端直接拿它和 AUTH_HASH 比
+    const cookie = `fnstart_auth=${sha256(TOKEN)}`;
+    const get = () =>
+      fetch(`${BASE}/`, {
+        headers: { cookie },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15000),
+      });
+
+    const first = await get();
+    need(first.status === 200, `首次带 cookie 访问返回 ${first.status}`);
+    const sc = first.headers.get('set-cookie') || '';
+    need(/fnstart_auth=/.test(sc), '打开页面没有重发 cookie，滑动续期没生效');
+    need(/Max-Age=2592000/.test(sc), `Max-Age 不对：${sc}`);
+
+    // 再来一次，确认是「每次打开页面都续」而不是只发一次
+    await first.text();
+    const second = await get();
+    need(/fnstart_auth=/.test(second.headers.get('set-cookie') || ''), '第二次打开页面没有续期');
+    await second.text();
+    return '30 天顺延';
+  });
+
+  await test('?token= 一次性链接', async () => {
+    const r = await fetch(`${BASE}/?token=${encodeURIComponent(TOKEN)}`, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    need(r.status === 303, `状态码 ${r.status}，期望 303`);
+    need(/fnstart_auth=/.test(r.headers.get('set-cookie') || ''), '没有落下 cookie');
+    const loc = r.headers.get('location') || '';
+    need(!loc.includes('token='), `跳转地址还带着令牌：${loc}`);
+    return `→ ${loc}`;
+  });
+
+  await test('错误令牌被拒', async () => {
+    const r = await fetch(`${BASE}/?token=definitely-wrong`, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(10000),
+    });
+    need(r.status === 401, `状态码 ${r.status}，期望 401`);
+    return '401';
+  });
+}
+
 /* ---------- 收尾 ---------- */
 async function cleanup() {
   if (tmpId) {
@@ -326,13 +397,18 @@ async function cleanup() {
     console.log(`\n\x1b[33m注意\x1b[0m 临时卡片 ${tmpId} 未正常删除，已尝试补删`);
   }
   const s = await req('/api/state').catch(() => null);
-  if (s?.data) {
-    const junk = s.data.cards.filter((c) => c.name?.startsWith('__自检') || c.url?.includes('selftest'));
+  // 没带令牌时 /api/state 返回的是 { ok:false, error:'需要访问令牌' }，
+  // 没有 cards 字段 —— 直接读 .cards.filter 会把自己崩掉，而这恰好是部署者最常犯的错。
+  const cards = s?.data?.cards;
+  if (Array.isArray(cards)) {
+    const junk = cards.filter((c) => c.name?.startsWith('__自检') || c.url?.includes('selftest'));
     for (const c of junk) {
       await req(`/api/cards/${c.id}`, { method: 'DELETE' }).catch(() => {});
       console.log(`\x1b[33m注意\x1b[0m 清理残留卡片：${c.name}`);
     }
-    console.log(`\n剩余卡片 ${s.data.cards.length} 张`);
+    console.log(`\n剩余卡片 ${cards.length} 张`);
+  } else if (s && s.status === 401) {
+    console.log('\n\x1b[33m提示\x1b[0m 这台实例要令牌，但环境变量 ACCESS_TOKEN 没给，自检读不到数据');
   }
 }
 
@@ -340,6 +416,7 @@ async function cleanup() {
 console.log(`\x1b[1mfnstart 自检\x1b[0m  →  ${BASE}${NO_WRITE ? '  \x1b[2m(只读模式)\x1b[0m' : ''}`);
 
 try {
+  await authTests();
   await staticTests();
   await stateTests();
   await cardTests();
@@ -350,11 +427,12 @@ try {
 }
 
 const dt = ((Date.now() - t0) / 1000).toFixed(1);
+const skipped = skips.length ? ` · ${skips.length} 项跳过` : '';
 console.log(`\n${'─'.repeat(46)}`);
 if (fails.length) {
-  console.log(`\x1b[31m${fails.length} 项失败\x1b[0m · ${pass} 项通过 · 用时 ${dt}s`);
+  console.log(`\x1b[31m${fails.length} 项失败\x1b[0m · ${pass} 项通过${skipped} · 用时 ${dt}s`);
   for (const f of fails) console.log(`  · ${f.name}: ${f.err}`);
   process.exit(1);
 } else {
-  console.log(`\x1b[32m全部通过\x1b[0m · ${pass} 项 · 用时 ${dt}s`);
+  console.log(`\x1b[32m全部通过\x1b[0m · ${pass} 项${skipped} · 用时 ${dt}s`);
 }

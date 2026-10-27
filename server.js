@@ -196,13 +196,15 @@ const loginPage = (msg = '') => `<!doctype html>
     font-size:14px;font-weight:600;cursor:pointer}
   button:active{transform:scale(.99)}
   .err{margin:14px 0 0;font-size:12.5px;color:#ff8b87}
+  .tip{margin:16px 0 0;font-size:11.5px;line-height:1.7;color:#6e6e6c}
 </style></head>
 <body><form method="POST" action="/__login">
   <h1>需要访问令牌</h1>
-  <p>这台 fnStart 开了访问保护。输入部署时设置的 ACCESS_TOKEN。</p>
+  <p>这是私人主页，仅部署者本人可用。输入部署时设的 ACCESS_TOKEN。</p>
   <input name="token" type="password" placeholder="访问令牌" autocomplete="current-password" autofocus>
   <button type="submit">进入</button>
   ${msg ? `<div class="err">${msg}</div>` : ''}
+  <div class="tip">登录一次记 30 天；只要期间打开过主页，有效期会自动往后顺延。忘了令牌见 README「忘了令牌怎么办」。</div>
 </form></body></html>`;
 
 async function serveFile(res, filePath, { cache = 'no-cache', download = false } = {}) {
@@ -521,6 +523,12 @@ const server = http.createServer(async (req, res) => {
         if (p.startsWith('/api/')) return json(res, 401, { ok: false, error: '需要访问令牌' });
         return html(res, 401, loginPage());
       }
+      // 滑动续期：只在「打开页面」时重发一次 cookie，把 30 天重新算起。
+      // 不这么做的话 Max-Age 是硬过期 —— 第 31 天不管你昨天刚用过，照样被踢回登录页。
+      // 静态资源和 /api/ 不续，免得每个图标响应都多背一个 Set-Cookie。
+      if (how === 'cookie' && (p === '/' || p === '/index.html')) {
+        res.setHeader('Set-Cookie', authCookie(req));
+      }
       // 用 ?token= 进来的一次性链接：换成 cookie，别把令牌留在地址栏和访问记录里
       if (how === 'query') {
         const clean = new URL(url);
@@ -584,6 +592,21 @@ server.listen(CONFIG.port, '0.0.0.0', () => {
   console.log(`[fnstart] 已启动 → http://0.0.0.0:${CONFIG.port}`);
   console.log(`[fnstart] 数据目录 ${CONFIG.dataDir}`);
   console.log(`[fnstart] Docker socket ${CONFIG.dockerSock}`);
+  /*
+   * 启动时把访问保护的状态说清楚，但**永远不打印令牌本身** ——
+   * docker logs 是很多人会随手分享出去的东西，令牌进了日志等于半公开。
+   * 只报长度，够判断「有没有设」「是不是太短」。
+   */
+  if (AUTH_HASH) {
+    const n = String(CONFIG.accessToken).length;
+    console.log(`[fnstart] 访问保护：已开启（令牌 ${n} 位，cookie 30 天滑动续期）`);
+    if (n < 16) {
+      console.warn('[fnstart] 令牌偏短，建议至少 16 位：openssl rand -hex 16');
+    }
+  } else {
+    console.warn('[fnstart] 访问保护：未开启 —— 任何能访问到端口的人都能改卡片、读监控、导出备份');
+    console.warn('[fnstart] 只要端口能被本机以外访问，就该设 ACCESS_TOKEN，见 README「访问令牌的一生」');
+  }
   probeMonitor();
 });
 

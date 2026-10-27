@@ -291,6 +291,8 @@ environment:
 - 脚本用 `Authorization: Bearer <token>`，或者一次性链接 `?token=xxx`（验证后自动转 cookie 并抹掉地址栏里的参数）
 - **顺手关掉两个洞**：`/fn/` 代理只认启动时的 `MONITOR_URL`/`MONITOR_PORT`，设置里改监控地址不再影响服务端请求（开放代理失效）；`/api/icon/fetch` 禁止抓内网与环回地址
 - 上传限制到单张 2MB、目录总量 200MB；SVG 会做内容清洗，并在响应头加 `Content-Security-Policy: default-src 'none'`（脚本、事件属性全部失效）
+- 代理转发时会**摘掉自己的令牌和 cookie**，只保留上游自己的那些 —— 否则你的访问令牌会跟着请求落进 fnMonitor 的日志里
+- 登录连续失败会逐步变慢（400ms → 5s），脚本爆破没有意义
 
 不设令牌时以上保护不启用（`BLOCK_PRIVATE_FETCH` 除外可单独设），行为和以前完全一样 —— 内网照常用，不会因为这次加固少任何功能。
 

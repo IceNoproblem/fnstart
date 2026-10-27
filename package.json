@@ -1,6 +1,6 @@
 {
   "name": "fnstart",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "飞牛开始页 —— 飞牛 NAS 用户专属的浏览器主页：自动发现服务、融合飞牛监控、卡片可拖拽编辑",
   "type": "module",
   "main": "server.js",

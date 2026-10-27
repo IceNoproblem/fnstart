@@ -115,6 +115,12 @@ const AUTH_COOKIE = 'fnstart_auth';
 const AUTH_MAX_AGE = 30 * 24 * 3600;
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 const AUTH_HASH = CONFIG.accessToken ? sha256(CONFIG.accessToken) : '';
+let authFail = 0; // 登录失败次数，用于递增延时
+
+/** 交给代理的「我方凭证」描述：只摘自己那一条，别动上游自己的登录态 */
+const PROXY_AUTH = AUTH_HASH
+  ? { cookieName: AUTH_COOKIE, tokenHash: AUTH_HASH, sha256 }
+  : null;
 
 const hashEq = (a, b) => {
   if (!a || !b || a.length !== b.length) return false;
@@ -150,6 +156,7 @@ const html = (res, code, body) => {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
   });
   res.end(body);
 };
@@ -204,6 +211,7 @@ async function serveFile(res, filePath, { cache = 'no-cache', download = false }
     if (download) headers['Content-Disposition'] = 'attachment';
     // 上传的 SVG 是同源文档，直接打开会执行里面的事件脚本。
     // 这里用 CSP 把所有脚本能力按住，矢量图标照常显示。
+    if (ext === '.html') headers['X-Frame-Options'] = 'SAMEORIGIN';
     if (ext === '.svg') {
       headers['Content-Security-Policy'] =
         "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
@@ -217,7 +225,10 @@ async function serveFile(res, filePath, { cache = 'no-cache', download = false }
 
 const safeJoin = (base, rel) => {
   const p = path.normalize(path.join(base, decodeURIComponent(rel)));
-  return p.startsWith(base) ? p : null;
+  // 只判 startsWith(base) 是不够的：/data/icons-evil 也能通过 /data/icons 的前缀匹配。
+  // 必须要求正好等于 base，或者以 base + 分隔符开头。
+  if (p === base) return p;
+  return p.startsWith(base + path.sep) ? p : null;
 };
 
 const saveUpload = async (dir, dataUri, prefix = 'up', urlBase = '/backgrounds') => {
@@ -485,10 +496,14 @@ const server = http.createServer(async (req, res) => {
           Location: '/',
           'Cache-Control': 'no-store',
         });
+        authFail = 0;
         return res.end();
       }
-      // 慢一点，别让人拿这个接口当爆破入口
-      await new Promise((r) => setTimeout(r, 400));
+      // 连续输错就逐步变慢（400ms → 5s），别让人拿这个接口当爆破入口。
+      // 正常人只会错一两次，感知不到；脚本爆破则被拖到没有意义。
+      authFail += 1;
+      const wait = Math.min(400 * 2 ** Math.min(authFail - 1, 4), 5000);
+      await new Promise((r) => setTimeout(r, wait));
       return html(res, 401, loginPage('令牌不对，再试一次'));
     }
 
@@ -514,7 +529,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/')) return await handleApi(req, res, url);
 
     if (p.startsWith('/fn/')) {
-      handleProxy(req, res, { targetUrl: proxyTarget() });
+      handleProxy(req, res, { targetUrl: proxyTarget(), auth: PROXY_AUTH });
       return;
     }
 
@@ -551,7 +566,7 @@ server.on('upgrade', async (req, socket, head) => {
     return;
   }
   if (String(req.url || '').startsWith('/fn/')) {
-    return handleUpgrade(req, socket, head, { targetUrl: proxyTarget() });
+    return handleUpgrade(req, socket, head, { targetUrl: proxyTarget(), auth: PROXY_AUTH });
   }
   socket.destroy();
 });

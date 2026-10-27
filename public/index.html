@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>控制台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1120'/%3E%3Cpath d='M20 26h24M20 34h16M20 42h20' stroke='%236ee7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="bg-image" id="bgImage"></div>
+<div class="bg-aurora"><i></i><i></i><i></i><i></i><i></i></div>
+<div class="bg-veil" id="bgVeil"></div>
+<div class="bg-grain"></div>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v11M8 10l4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.5 7.6l2 1.2M17.5 15.2l2 1.2M4.5 16.4l2-1.2M17.5 8.8l2-1.2"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4h-4"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="17" r="1.4"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M5 18l5-5 4 4 2-2 3 3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></symbol>
+  <symbol id="i-full-exit" viewBox="0 0 24 24"><path d="M9 4v4a1 1 0 0 1-1 1H4M15 4v4a1 1 0 0 0 1 1h4M9 20v-4a1 1 0 0 0-1-1H4M15 20v-4a1 1 0 0 1 1-1h4"/></symbol>
+</svg>
+
+<main class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1 id="siteTitle" class="site-title" title="点击可修改标题">控制台</h1>
+      <span class="brand-sub" id="siteSub"></span>
+    </div>
+    <div class="topbar-tools">
+      <button class="tool-btn" id="scanBtn" title="扫描 NAS 上的容器与服务">
+        <svg class="ic"><use href="#i-scan"/></svg><span>扫描服务</span>
+      </button>
+      <button class="tool-btn" id="importBtn" title="导入浏览器书签">
+        <svg class="ic"><use href="#i-import"/></svg><span>导入书签</span>
+      </button>
+      <button class="tool-btn icon-only" id="fullBtn" title="全屏显示（隐藏浏览器界面）">
+        <svg class="ic"><use href="#i-full"/></svg>
+      </button>
+      <button class="tool-btn icon-only" id="settingsBtn" title="设置">
+        <svg class="ic"><use href="#i-settings"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="search-row">
+  <button class="chip wx-chip" id="wxChip" type="button" title="点击设置天气城市">
+    <span class="chip-ico" id="wxIcon">☀</span>
+    <span class="dm chip-dm" id="wxTemp"></span>
+    <span class="chip-unit">°</span>
+  </button>
+
+  <section class="search-zone">
+    <form class="searchbar" id="searchForm" autocomplete="off">
+      <button type="button" class="engine-trigger" id="engineTrigger" title="切换搜索引擎">
+        <span class="engine-badge" id="engineBadge">必</span>
+        <svg class="ic chev"><use href="#i-chevron"/></svg>
+      </button>
+      <input id="q" type="text" placeholder="搜索，或直接输入网址…" spellcheck="false" enterkeyhint="go">
+      <button type="submit" class="search-go" title="搜索"><svg class="ic"><use href="#i-search"/></svg></button>
+    </form>
+    <div class="engine-menu" id="engineMenu" hidden></div>
+    <div class="hint" id="searchHint"></div>
+  </section>
+
+  <button class="chip clock-chip" id="clockChip" type="button" title="点击设置时区">
+    <span class="dm chip-dm" id="clockDm"></span>
+  </button>
+
+  <button class="chip date-chip" id="dateChip" type="button" title="点击设置时区">
+    <span class="dm date-dm" id="dateDm"></span>
+    <span class="date-week" id="dateWeek"></span>
+  </button>
+  </div>
+
+  <div class="stage">
+    <div class="boards" id="boards" aria-label="服务卡片"></div>
+
+    <aside class="monitor" id="monitor" hidden>
+      <div class="mon-head">
+        <span class="mon-dot"></span>
+        <span class="mon-host" id="monHost">NAS</span>
+        <span class="mon-up" id="monUp"></span>
+        <div class="mon-tools">
+          <button class="m-btn" id="mRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          <button class="m-btn" id="mOpen" title="打开原生监控页"><svg class="ic"><use href="#i-external"/></svg></button>
+          <button class="m-btn" id="mCollapse" title="折叠"><svg class="ic"><use href="#i-collapse"/></svg></button>
+        </div>
+      </div>
+      <div class="mon-panel" id="monPanel"></div>
+      <iframe id="monitorFrame" title="飞牛监控" referrerpolicy="no-referrer" hidden></iframe>
+    </aside>
+  </div>
+
+  <div class="empty" id="emptyState" hidden>
+    <p>还没有卡片</p>
+    <button class="btn primary" id="emptyScan">扫描 NAS 上的服务</button>
+  </div>
+
+  <button class="fab" id="addBtn" title="新增卡片"><svg class="ic"><use href="#i-plus"/></svg></button>
+</main>
+
+<button class="fn-pill" id="fnPill" hidden title="展开飞牛监控">
+  <span class="fn-text">fn</span>
+  <span class="fn-stats" id="fnStats"></span>
+</button>
+
+<!-- 卡片编辑 -->
+<div class="modal" id="cardModal" hidden>
+  <div class="modal-card">
+    <header class="modal-head">
+      <h2 id="cardModalTitle">编辑卡片</h2>
+      <button class="m-btn" data-close><svg class="ic"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="preview" id="cardPreview"></div>
+    <div class="field">
+      <label>名称</label>
+      <input id="fName" type="text" maxlength="60" placeholder="例如 影视库">
+    </div>
+    <div class="field">
+      <label>地址</label>
+      <input id="fUrl" type="text" placeholder="http://192.168.1.10:8096">
+    </div>
+    <div class="field">
+      <label>备注<small>可选，显示在名称下方</small></label>
+      <input id="fDesc" type="text" maxlength="60" placeholder="例如 影视库 / 电影电视剧">
+    </div>
+    <div class="field">
+      <label>图标</label>
+      <div class="icon-row">
+        <div class="icon-big" id="fIconBox"></div>
+        <button class="btn ghost sm" id="fIconAuto">自动抓取</button>
+        <label class="btn ghost sm file-label">上传<input type="file" id="fIconFile" accept="image/*" hidden></label>
+        <button class="btn ghost sm" id="fIconClear">清空</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>卡片颜色</label>
+      <div class="swatches" id="fSwatches"></div>
+      <div class="color-line">
+        <input type="color" id="fColor" value="#4f8cff">
+        <input type="text" id="fColorHex" class="hex" maxlength="7" spellcheck="false">
+        <button class="btn ghost sm" id="fColorAuto">按图标取色</button>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <button class="btn danger ghost" id="fDelete">删除卡片</button>
+      <div class="spacer"></div>
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="fSave">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card wide">
+    <header class="modal-head">
+      <h2>设置</h2>
+      <button class="m-btn" data-close><svg class="ic"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="tabs">
+      <button class="tab active" data-tab="theme">外观</button>
+      <button class="tab" data-tab="monitor">飞牛监控</button>
+      <button class="tab" data-tab="cards">卡片</button>
+      <button class="tab" data-tab="data">数据</button>
+    </div>
+
+    <div class="tab-panel" data-panel="theme">
+      <div class="field"><label>站点标题</label><input id="sTitle" type="text" maxlength="40"></div>
+      <div class="field"><label>副标题<small>可选</small></label><input id="sSubtitle" type="text" maxlength="60"></div>
+      <div class="field">
+        <label>背景</label>
+        <div class="seg" id="bgTypeSeg">
+          <button data-v="aurora">极光渐变</button>
+          <button data-v="color">纯色</button>
+          <button data-v="image">图片</button>
+        </div>
+      </div>
+      <div class="field" id="bgColorField">
+        <label>背景色</label>
+        <div class="color-line">
+          <input type="color" id="sBgColor" value="#0a0d18">
+          <input type="text" id="sBgColorHex" class="hex" maxlength="7" spellcheck="false">
+        </div>
+      </div>
+      <div class="field" id="bgImageField" hidden>
+        <label>背景图片</label>
+        <div class="icon-row">
+          <label class="btn ghost sm file-label">上传图片<input type="file" id="sBgFile" accept="image/*" hidden></label>
+          <input type="text" id="sBgUrl" class="grow" placeholder="或粘贴图片地址 https://…">
+        </div>
+      </div>
+      <div class="field">
+        <label>模糊 <output id="blurOut">0px</output></label>
+        <input type="range" id="sBlur" min="0" max="24" step="1">
+      </div>
+      <div class="field">
+        <label>暗化 <output id="dimOut">15%</output></label>
+        <input type="range" id="sDim" min="0" max="80" step="1">
+      </div>
+      <div class="field row">
+        <label class="switch"><input type="checkbox" id="sGrain"><span></span>噪点纹理</label>
+        <label class="switch"><input type="checkbox" id="sMonitorStats"><span></span>折叠时显示实时指标</label>
+      </div>
+      <div class="field">
+        <label>每行列数</label>
+        <div class="seg" id="colSeg">
+          <button data-v="0">自适应</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>天气<small>搜索栏左侧，输入城市名</small></label>
+        <div class="icon-row">
+          <label class="switch"><input type="checkbox" id="sWxOn"><span></span>显示</label>
+          <input type="text" id="sWxCity" class="grow" placeholder="例如 北京 / 上海 / Shenzhen">
+          <button class="btn ghost sm" id="sWxApply">应用</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>时钟<small>搜索栏右侧</small></label>
+        <div class="icon-row">
+          <label class="switch"><input type="checkbox" id="sClockOn"><span></span>显示</label>
+          <select id="sTz" class="grow sel"></select>
+          <label class="switch"><input type="checkbox" id="sClockSec"><span></span>显示秒</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="monitor" hidden>
+      <div class="field row">
+        <label class="switch"><input type="checkbox" id="sMonEnabled"><span></span>启用飞牛监控侧栏</label>
+        <label class="switch"><input type="checkbox" id="sMonCollapsed"><span></span>默认折叠</label>
+      </div>
+      <div class="field">
+        <label>监控地址</label>
+        <input id="sMonUrl" type="text" placeholder="http://192.168.1.10:8777/#/overview">
+      </div>
+      <div class="field">
+        <label>监控展示方式<small>融合面板读取数据自己画，完全融进背景；嵌入原页则是直接 iframe 飞牛页面</small></label>
+        <div class="seg" id="monModeSeg">
+          <button data-v="native">融合面板</button>
+          <button data-v="direct">嵌入原页</button>
+          <button data-v="proxy">代理嵌入</button>
+        </div>
+      </div>
+      <p class="tip">融合面板用的是飞牛监控的 <code>/api/overview</code> 接口，不依赖页面能否被 iframe 嵌入，深色背景下也没有白色方块。</p>
+    </div>
+
+    <div class="tab-panel" data-panel="cards" hidden>
+      <p class="tip" style="margin:0 0 12px">关掉的卡片不会显示在页面上，数据仍保留，随时可以再打开。</p>
+      <div class="ct-list" id="cardToggles"></div>
+    </div>
+
+    <div class="tab-panel" data-panel="data" hidden>
+      <div class="field">
+        <label>备份</label>
+        <div class="icon-row">
+          <a class="btn ghost sm" href="/api/export" download>导出全部数据</a>
+          <button class="btn ghost sm" id="sRescan">重新扫描容器</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>卡片数量</label>
+        <p class="tip" id="statsLine">—</p>
+      </div>
+    </div>
+
+    <footer class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn ghost" data-close>关闭</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 导入书签 -->
+<div class="modal" id="importModal" hidden>
+  <div class="modal-card wide">
+    <header class="modal-head">
+      <h2>导入书签</h2>
+      <button class="m-btn" data-close><svg class="ic"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="field">
+      <label>方式一：上传浏览器导出的书签文件</label>
+      <div class="icon-row">
+        <label class="btn ghost sm file-label">选择 bookmarks.html<input type="file" id="bmFile" accept=".html,.htm,text/html" hidden></label>
+        <span class="tip" id="bmFileName"></span>
+      </div>
+      <p class="tip">Chrome / Edge：<code>chrome://bookmarks</code> → 右上角 ⋮ → 导出书签。Firefox / Safari 同理。</p>
+    </div>
+    <div class="field">
+      <label>方式二：直接粘贴</label>
+      <textarea id="bmText" rows="7" placeholder="支持整份书签 HTML 粘贴，也支持一行一个网址：&#10;https://www.bilibili.com 哔哩哔哩&#10;https://github.com"></textarea>
+    </div>
+    <footer class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="bmImport">导入</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="sheet-mask" id="sheetMask" hidden></div>
+
+<script src="/js/app.js" type="module"></script>
+</body>
+</html>

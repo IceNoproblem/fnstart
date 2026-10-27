@@ -1,0 +1,225 @@
+/*
+ * fnstart 监控面板皮肤
+ *
+ * 说明：这是 fnstart 自己的样式表，不包含任何来自 fnOS / 飞牛监控的代码。
+ * 面板的视觉语言（深色底、点阵数字、细线计量条）是照着 fnMonitor 首页的
+ * 「观感」重写的，变量名与色值取自公开可见的深色配色，规则全部自己实现。
+ *
+ * 挂在 Shadow DOM 里，所以 :host 就是面板容器本身。
+ */
+
+:host {
+  /* 深色配色 */
+  --ink-1: #f2f2f0;
+  --ink-2: #92928f;
+  --ink-3: #64645f;
+  --card: #161616;
+  --line: rgba(255, 255, 255, 0.08);
+  --fill-1: rgba(255, 255, 255, 0.055);
+  --fill-2: rgba(255, 255, 255, 0.09);
+  --off: rgba(255, 255, 255, 0.08);
+  --health-ok: #3bc47b;
+  --warn: #ff8f49;
+  --crit: #e54c4a;
+  --d-p: #5585e8;
+  --e-blue: #5585e8;
+  --e-coral: #b761b1;
+  --e-teal: #1f9c86;
+  --e-violet: #bea4ff;
+
+  /* 字体与间距 */
+  --font-sans: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --fs-xs: 10.5px;
+  --fs-sm: 11.5px;
+  --s3: 8px;
+  --s4: 11px;
+
+  display: block;
+  color: var(--ink-1);
+  font: 400 13px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.fn-wrap {
+  display: block;
+}
+
+/* 指标卡网格：等高等宽，列数随宽度自动增减 */
+.grid.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 10px;
+}
+
+.card.metric {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 148px;
+  padding: 17px 18px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.045);
+  backdrop-filter: blur(12px);
+}
+
+.metric .m-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: var(--s3);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.metric .label {
+  letter-spacing: 0.4px;
+}
+
+.metric .m-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  color: var(--ink-3);
+}
+
+.metric.is-warn .m-state {
+  color: var(--warn);
+}
+
+.metric.is-crit .m-state {
+  color: var(--crit);
+}
+
+.metric .m-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.metric .m-val {
+  display: flex;
+  align-items: flex-end;
+}
+
+.metric .m-sub {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+  white-space: normal;
+}
+
+/* 空副标题也占一行高度，避免卡片之间高度跳变 */
+.metric .m-sub:empty::before {
+  content: "\00a0";
+}
+
+.metric .m-foot {
+  margin-top: var(--s4);
+}
+
+/* ---------- 5×7 点阵数字 ---------- */
+.dm {
+  display: inline-flex;
+  flex: none;
+  align-items: flex-end;
+  line-height: 0;
+  color: inherit;
+  vertical-align: bottom;
+}
+
+.dm svg {
+  display: block;
+  height: var(--dm-h, 40px);
+  width: calc(var(--dm-h, 40px) * var(--u) / 7);
+  overflow: visible;
+}
+
+.dm circle {
+  fill: var(--off);
+  transition: fill 0.32s ease;
+}
+
+.dm circle.on {
+  fill: currentColor;
+}
+
+/* 数字 + 单位的一行 */
+.dnum {
+  --dm-h: 40px;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: calc(var(--dm-h) * 0.16);
+  line-height: 1;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dnum > .unit {
+  margin: 0 0 -1px;
+  font: 600 max(11px, calc(var(--dm-h) * 0.32)) / 1 var(--font-sans);
+  letter-spacing: 0;
+  color: var(--ink-2);
+}
+
+.dnum > .unit:empty {
+  display: none;
+}
+
+.metric .m-val.dnum {
+  --dm-h: 44px;
+}
+
+.metric.is-crit .m-val {
+  color: var(--crit);
+}
+
+/* 网络卡的两行数字 */
+.net-vals .row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.net-vals .dnum {
+  --dm-h: 30px;
+}
+
+.net-vals .arr {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* 卡片底部的横向细条，具体配色在 app.js 的覆盖样式里 */
+.m-meter {
+  position: relative;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--fill-2);
+}
+
+.m-meter > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  transition: width 0.9s cubic-bezier(0.22, 0.8, 0.24, 1), background 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm circle,
+  .m-meter > i {
+    transition: none;
+  }
+}

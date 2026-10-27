@@ -1,0 +1,15 @@
+# 运行时数据：卡片、图标、背景图、监控/天气快照都在这里，不要提交
+data/
+
+# 本地截图与调试产物
+screenshots/
+
+# 依赖（本项目其实零依赖，留着以防哪天加了）
+node_modules/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

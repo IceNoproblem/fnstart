@@ -1,0 +1,40 @@
+{
+  "name": "fnstart",
+  "version": "1.0.0",
+  "description": "飞牛开始页 —— 飞牛 NAS 用户专属的浏览器主页：自动发现服务、融合飞牛监控、卡片可拖拽编辑",
+  "type": "module",
+  "main": "server.js",
+  "license": "MIT",
+  "author": "IceNoproblem",
+  "homepage": "https://github.com/IceNoproblem/fnstart",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IceNoproblem/fnstart.git"
+  },
+  "keywords": [
+    "fnos",
+    "fnmonitor",
+    "startpage",
+    "homepage",
+    "nas",
+    "dashboard",
+    "docker",
+    "self-hosted"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "selftest": "node scripts/selftest.mjs"
+  },
+  "files": [
+    "server.js",
+    "lib",
+    "public",
+    "scripts",
+    "Dockerfile",
+    "docker-compose.yml"
+  ]
+}

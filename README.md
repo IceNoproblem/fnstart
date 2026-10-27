@@ -1,0 +1,281 @@
+# fnStart · 飞牛开始页
+
+> **一个只给飞牛 NAS 用户准备的浏览器主页。**
+> 打开浏览器，你 NAS 上跑的东西全在这一屏：能点、能拖、能改，右边还挂着一块跟着飞牛监控实时跳动的仪表盘。
+
+![fnStart 界面](docs/screenshot.png)
+
+<p align="center"><sub>↑ 演示数据，不是任何人的真实内网</sub></p>
+
+---
+
+## 这玩意儿到底解决什么问题
+
+用 NAS 的人大概都有这个流程：想开 Jellyfin，先在收藏夹里翻；想开 qBittorrent，忘了端口是 8080 还是 8081；想看看 CPU 现在多热，再切到飞牛监控那个页面。
+
+fnStart 干的事很简单：**把这些散落的入口，收成一页。**
+
+- 自动扫出 NAS 上所有带 Web 界面的服务（**包括那些用 host 网络、根本没做端口映射的容器**）
+- 每张卡片自动配好图标、颜色、名字，扫完就能点
+- 右侧融进一块飞牛监控面板，深色、点阵数字、底部细计量条，不弹窗、不套白框，直接长在背景上
+- 顶部一条：左边天气、中间搜索（百度/必应/谷歌/…）、右边时间与日期
+- 全屏一个按钮的事，浏览器标题栏菜单栏都不占地方
+
+没有前端框架，没有 `npm install`，没有构建步骤。**零第三方依赖**，一个 `node server.js` 就跑起来了。
+
+---
+
+## 部署之前，先说清楚一件事
+
+fnStart 不是"一个容器解决一切"。**完整功能需要两块拼图**：
+
+| 拼图 | 是什么 | 怎么来 |
+|---|---|---|
+| **① 飞牛监控 fnMonitor** | 飞牛 fnOS 上的一个应用，提供 `/api/overview` 实时数据，监听 **8777** | 在飞牛「应用中心」里安装并打开 |
+| **② fnStart** | 本项目，一个 Node 容器，提供这一页 | `docker compose up -d` |
+
+### 关于 fnMonitor，得说实话
+
+- 它是飞牛的应用，**不是 Docker 镜像**，所以没法写进 `docker-compose.yml` 跟着一起 `up`。你在应用中心点安装，它才存在。
+- 本项目**不分发、不修改、不打包** fnMonitor 的任何代码。我们只是用 HTTP 去读它自己对外提供的 `/api/overview` 接口——和你用浏览器打开它的页面看到的是同一份数据。
+- **没装 fnMonitor 也能用**。只是右侧面板会显示"读不到监控数据"，其余功能（卡片、书签、搜索、天气、时钟）一切正常。
+
+---
+
+## 部署流程
+
+### 第 0 步：装飞牛监控（想要监控面板就必做）
+
+1. 打开飞牛 NAS 的**应用中心**，搜索「**飞牛监控**」（fnMonitor），安装并启动
+2. 浏览器访问 `http://你的NAS地址:8777/#/overview`，能看见面板就对了
+3. 顺手验一下接口（后面 fnStart 读的就是它）：
+
+```bash
+curl http://你的NAS地址:8777/api/overview | head -c 200
+# 应该吐出一大坨 JSON；如果超时或 404，先解决这一步
+```
+
+### 第 1 步：部署 fnStart
+
+三种方式，挑一种。
+
+#### 方式 A：docker compose（推荐）
+
+```bash
+# 1. 把源码放到 NAS 上（飞牛自带 git；没有就在电脑上下载 zip 再传上去）
+git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
+cd /vol1/docker/fnstart
+
+# 2. 起容器（首次会构建一个基于 node:22-alpine 的小镜像）
+docker compose up -d --build
+```
+
+也可以把仓库里的 `docker-compose.yml` 贴进飞牛的「Docker → 项目 → 新建」，项目路径填 `/vol1/docker/fnstart`（目录里要有源码，因为镜像是从这份源码构建的）。
+
+> 构建那一步如果卡住，多半是 NAS 的镜像加速源拉不到 `node:22-alpine`，不影响使用——直接跳到下面的**方式 B**，用官方镜像挂载源码跑，一样的效果。
+
+#### 方式 B：docker run 一行流
+
+```bash
+docker run -d --name fnstart \
+  --network host \
+  --restart unless-stopped \
+  --cap-add=SYS_PTRACE \
+  -v /vol1/docker/fnstart:/app:ro \
+  -v /vol1/docker/fnstart/data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v /proc:/host/proc:ro \
+  -w /app -e PORT=3721 -e DATA_DIR=/data \
+  node:22-alpine node server.js
+```
+
+（`node:22-alpine` 是官方镜像，不需要本地构建。想自己构建就把 `node:22-alpine node server.js` 换成 `fnstart:latest`，先 `docker build -t fnstart .`。）
+
+#### 方式 C：不用 Docker
+
+有 Node 22 就行：
+
+```bash
+git clone https://github.com/IceNoproblem/fnstart.git
+cd fnstart
+PORT=3721 DATA_DIR=./data node server.js
+```
+
+（这样跑照样能扫端口，但读不到 Docker socket，容器名会退化——不影响使用。）
+
+### 第 2 步：打开它，并设成浏览器首页
+
+访问 `http://你的NAS地址:3721`，看到卡片就成功了。
+
+设成首页：
+
+- **Chrome / Edge**：设置 → 启动时 → 打开特定网页 → 填 `http://你的NAS地址:3721`
+- **Safari**：偏好设置 → 通用 → 主页
+- 想连"新建标签页"也变成它，装个 *New Tab Redirect* 之类的扩展指过去
+
+右上角那个**四角箭头**是全屏按钮，点了之后浏览器的标签栏、地址栏、菜单栏全部隐藏，只剩内容。Windows 和 macOS 都吃这一套——它走的是浏览器标准的 Fullscreen API，不是给 Mac 开后门。想退出按 `Esc` 或再点一次。
+
+### 第 3 步：确认一下
+
+```bash
+docker logs fnstart --tail 20
+```
+
+看到这几行就算齐活：
+
+```
+[fnstart] 已启动 → http://0.0.0.0:3721
+[fnstart] 数据目录 /data
+[fnstart] Docker socket /var/run/docker.sock
+[fnstart] 飞牛监控已连接 → http://127.0.0.1:8777/api/overview
+```
+
+最后一行如果变成"没连上飞牛监控"，那就是第 0 步没做完，回到上面重来。
+
+想更彻底地体检，用自带的自检脚本（会自己清理测试数据，不会打乱你的卡片）：
+
+```bash
+docker exec fnstart node /app/scripts/selftest.mjs
+```
+
+---
+
+## 怎么用
+
+**扫描服务** — 顶栏「扫描服务」，扫完后新发现的服务会作为卡片加进来。第一次打开页面时也会自动跑一次。
+
+**导入书签** — 顶栏「导入书签」，把浏览器导出的 `bookmarks.html` 拖进去，收藏夹里的链接会归到下方「收藏书签」分组，跟服务卡片用一条虚线分开。
+
+**编辑卡片** — 鼠标移上去，右上角出现两个小按钮（编辑 / 删除）。名字、地址、图标、颜色、备注都能改，也能上传自己的图。
+
+**拖动排序** — 直接按住卡片拖，会实时让位、松手落位。分组之间也能拖。
+
+**搜索时顺手找卡片** — 搜索框里打字，只要卡片名字/描述里对得上，卡片立刻亮起来（跟鼠标悬停一样的效果），下面还会告诉你命中几张。按回车就是真的去搜索了，高亮自动解除。
+
+**右上角设置** — 站点标题、副标题、背景（极光 / 纯色 / 图片）、每行列数、天气城市、时钟时区，以及**任意一张卡片的单独开关**（不想让家人看到某些入口时很有用）。
+
+**窄屏会自动变形** — 窗口不够宽时，监控面板收成右边一颗小胶囊（显示 CPU/内存/温度），点它才铺开看详情；宽屏则并排显示。
+
+---
+
+## 它凭什么能自动发现我的服务
+
+这是这个项目里唯一有点技术含量的部分，值得单独说：
+
+1. **读宿主机的 `/proc/net/tcp`**，拿到所有处于 LISTEN 的端口。所以 `--network host` 的容器（没有端口映射）也能被发现——这是关键，NAS 上大部分容器都是 host 网络。
+2. 对每个端口做一次 TCP 探活，再发一个轻量 HTTP 请求，从 `<title>` 里猜出这是哪个服务。404 页、报错页会被过滤掉，不会给你生成一张"Error"卡片。
+3. **认领容器名**：bridge 网络的容器从 Docker API 的端口映射直接读；host 网络的容器没有映射，就反过来查——端口 → socket inode → 持有它的进程 → 属于哪个容器。这一步需要容器能看见宿主机进程表，也就是 compose 里那两个配置：
+
+```yaml
+cap_add: [SYS_PTRACE]              # 读 /proc/<pid>/fd 需要
+volumes:
+  - /proc:/host/proc:ro            # 看见宿主机的进程
+```
+
+`SYS_PTRACE` 听起来吓人，它只用于"读进程打开了哪些 socket"，本项目没有任何写操作、不 attach、不注入。**不想给也完全没问题**：去掉它，host 网络的容器会退回用网页标题命名（卡片叫"qBittorrent WebUI"而不是容器名），功能不受影响。
+
+4. 图标是运行时去各服务页面抓 `favicon`，抓到就存到 `data/icons/`，抓不到就用名字首字母配一个颜色——所以离线也能看。
+
+---
+
+## 配置项
+
+全是环境变量，改 `docker-compose.yml` 即可。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | `3721` | 监听端口 |
+| `DATA_DIR` | `/data` | 数据目录（卡片、图标、背景、快照） |
+| `MONITOR_URL` | 空 | 飞牛监控地址。**留空 = 自动用「访问本页的主机名:8777」**，换 IP 不用改 |
+| `MONITOR_PORT` | `8777` | 上面那个自动地址用的端口 |
+| `WEATHER_CITY` | `北京` | 天气默认城市，页面上也能改 |
+| `PUBLIC_HOST` | 空 | 强制卡片地址用这个主机名（反向代理/域名场景） |
+| `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径 |
+| `PROC_ROOT` | 自动 | 宿主机 procfs 挂载点，默认探测 `/host/proc` |
+| `PROBE_TIMEOUT` | `2500` | 单个端口探测超时（毫秒），服务多可调到 3000 |
+| `PROBE_CONCURRENCY` | `8` | 探测并发 |
+| `PROBE_PORTS` | 空 | 额外扫描的端口，逗号分隔（拿不到 `/proc` 时的兜底） |
+
+数据存在 `DATA_DIR` 里：`data.json`（卡片与设置）、`icons/`、`backgrounds/`、`last-monitor.json` / `last-weather.json`（网络抖一下时的兜底快照）。**备份整个目录就等于备份了整个站**，或者访问 `/api/export` 导出一份 JSON。
+
+---
+
+## 接口
+
+给想接自动化的人（也方便你自己写脚本改卡片）：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/state` | 全部设置 + 卡片 |
+| PATCH | `/api/settings` | 改设置（深合并） |
+| POST | `/api/cards` | 新建卡片 |
+| PATCH / DELETE | `/api/cards/:id` | 改 / 删卡片（`hidden` 控制显隐） |
+| POST | `/api/cards/reorder` | 拖动排序 |
+| GET / POST | `/api/discover` | 扫描服务（`?apply=0` 只扫描不落库） |
+| POST | `/api/import` | 导入浏览器书签 |
+| POST | `/api/icon/fetch` | 给一个网址抓图标 |
+| POST | `/api/upload/icon` · `/api/upload/background` | 上传图片（base64 data URI） |
+| GET | `/api/monitor/stats` | 监控快照（飞牛监控不可用时回退上次缓存） |
+| GET | `/api/monitor/ping` | 探一下监控地址通不通 |
+| GET | `/api/weather` | 天气 |
+| GET | `/api/export` | 导出整份数据 |
+| GET | `/fn/*` | 反向代理到飞牛监控（含 WebSocket） |
+
+---
+
+## 常见问题
+
+**右侧面板一直是"读不到监控数据"？**
+第 0 步没做，或者 8777 不通。`curl http://你的NAS:8777/api/overview` 试一下。用反代/HTTPS 的话，把 `MONITOR_URL` 显式写死。
+
+**只扫出来一半服务？**
+大概率是 host 网络容器没认领到名字，不是没发现。看看扫描结果里的端口数对不对；想认领名字就加上 `SYS_PTRACE` 和 `/proc` 挂载。另外 `PROBE_TIMEOUT` 太小会把慢服务漏掉，调到 3000 试试。
+
+**卡片地址变成了 `127.0.0.1`？**
+说明你是从 NAS 本机用 `127.0.0.1` 打开的。程序会自动换成局域网 IP，但如果机器有多个网卡可能挑错，这种时候设 `PUBLIC_HOST=192.168.x.x`。
+
+**天气显示 `--`？**
+天气走 open-meteo，需要外网。墙内偶尔抽风，失败时会退回上次成功的快照（6 小时内有效），所以一般只会短暂显示旧数据。
+
+**能不能放到公网？**
+**别。** 这个项目**没有任何登录鉴权**，任何能访问到端口的人都能改你的卡片、读你的监控数据。它是给内网用的。真要外网访问，套一层带认证的反向代理。
+
+**改了设置为什么不生效？**
+`data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。
+
+**会往外发我的数据吗？**
+不会。唯一的对外请求是天气（open-meteo，只发城市名和坐标）。没有统计、没有遥测、没有回连。
+
+---
+
+## 用了谁的东西
+
+这个项目站在别人肩膀上，该说清楚的都写在这儿。
+
+**飞牛 fnOS / 飞牛监控 fnMonitor** — 本项目是"飞牛用户专属"的工具，界面观感（深色底、点阵数字、细线计量条、卡片式指标）明显受 fnMonitor 首页启发；数据通过它对外提供的 `/api/overview` 接口读取。
+需要特别说明的是：**仓库里不包含 fnMonitor 或 fnOS 的任何一行代码、任何一份样式表。** 早期原型为了对照效果曾经直接引用过它的 CSS，在开源前已经整份删除并重写为 `public/css/fn-theme.css`（约 4KB，全是本项目自己写的规则），点阵字模也是自己写的 5×7 位图表。fnMonitor 的版权归飞牛（fnOS）所有，本项目与飞牛官方**没有任何隶属或背书关系**。
+
+**open-meteo** — 天气数据来源，免费、免密钥。数据以 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 授权提供，感谢他们不收费也不要求注册。
+<https://open-meteo.com/>
+
+**Node.js** — 运行时，MIT License。
+
+**图标** — 界面上的所有 SVG 图标（搜索、编辑、扫描、全屏…）都是本项目手写的 path；卡片图标是运行时从你各个服务自己的页面上抓的 favicon，版权归各服务方。
+
+**没有用到的**：React / Vue / Tailwind / 任何 npm 包。`package.json` 里 `dependencies` 是空的，你 `npm install` 会得到"up to date"然后无事发生。
+
+---
+
+## 许可
+
+[MIT](LICENSE) © 2026 IceNoproblem
+
+随便用、随便改、随便商用，出事了别找我（MIT 的原话比这长一点，意思一样）。
+
+---
+
+## 最后
+
+这是一个自己用着顺手、顺手做完整的小工具。如果你也是飞牛用户，希望它能让你每天少点几下鼠标。
+
+有问题、有想法、发现它在你机器上认不出某些服务，欢迎开 issue 把端口和现象贴上来。

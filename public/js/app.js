@@ -396,7 +396,8 @@ function boardEl(key, list, indexStart) {
     const ph = document.createElement('button');
     ph.className = 'board-empty';
     ph.type = 'button';
-    ph.innerHTML = '<svg class="ic" style="width:14px;height:14px"><use href="#i-plus"/></svg><span>添加卡片</span>';
+    // 带上组名，比干巴巴一句「添加卡片」更明确（手机上加号已经收起来了，这里要说清加到哪）
+    ph.innerHTML = `<svg class="ic" style="width:14px;height:14px"><use href="#i-plus"/></svg><span>向「${def.label}」添加</span>`;
     ph.addEventListener('click', () => openCardModal(null, key));
     grid.appendChild(ph);
   } else {
@@ -569,7 +570,7 @@ async function endDrag() {
 
 /* ---------------- 手机上长按卡片：操作面板 ----------------
  * 手机做不了「按住拖」——手指一滑页面就得滚，拖拽和滚动必然抢事件。
- * 所以触摸设备改成：按住不动 450ms 弹面板，用「上移 / 下移」完成排序。
+ * 所以触摸设备改成：按住不动 500ms 弹面板，用「上移 / 下移」完成排序。
  */
 let sheetEl = null;
 
@@ -687,7 +688,7 @@ el.boards.addEventListener('pointerdown', (e) => {
         navigator.vibrate?.(12);
       } catch {}
       openCardSheet(card);
-    }, 450);
+    }, 500);
     return;
   }
 
@@ -937,8 +938,12 @@ function openCardModal(card, group = 'service') {
   renderSwatches();
   renderIconBox();
   renderPreview();
+  const gsel = $('#fGroup');
+  if (gsel) gsel.value = editing.draft.group === 'bookmark' ? 'bookmark' : 'service';
   $('#cardModal').hidden = false;
-  setTimeout(() => $('#fName').focus(), 60);
+  // 手机上聚焦输入框会立刻唤起软键盘，误触后关掉还得多收一次键盘；
+  // 聚焦容器只为了让键盘 / 读屏拿到上下文，还能顺手把弹窗滚到顶。
+  setTimeout(() => $('#cardModal').querySelector('.modal-card')?.focus?.(), 60);
 }
 
 function renderIconBox() {
@@ -1094,6 +1099,9 @@ $('#fSave').addEventListener('click', async () => {
     .replace(/^https:\/\/([^/:]+):443(\/|$)/i, 'https://$1$2');
   d.name = name;
   d.desc = $('#fDesc').value.trim();
+  // 以选择器为准：闭包里拿到的 group 可能是打开弹窗时的旧值
+  const gsel = $('#fGroup');
+  if (gsel) d.group = gsel.value === 'bookmark' ? 'bookmark' : 'service';
   try {
     if (editing.id) {
       const r = await api(`/api/cards/${editing.id}`, { method: 'PATCH', body: d });
@@ -1105,7 +1113,7 @@ $('#fSave').addEventListener('click', async () => {
     }
     $('#cardModal').hidden = true;
     renderBoards();
-    toast('已保存');
+    toast(d.group === 'bookmark' ? '已保存到 收藏书签' : '已保存到 容器与服务');
   } catch (err) {
     toast(err.message, true);
   }

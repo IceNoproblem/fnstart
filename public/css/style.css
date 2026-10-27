@@ -263,6 +263,13 @@ body.has-monitor .stage::after{display:block}
 .board-sep .sep-add:hover{color:var(--ink);border-color:rgba(140,180,255,.5);background:rgba(120,160,255,.1)}
 .board-sep .sep-add .ic{width:11px;height:11px}
 
+/* 触屏上不显示组头加号：组头行高只有 32~36px，塞不下 44px 命中区，
+   且它会跟着每次滚动反复经过拇指落点。触屏改用 FAB + 弹窗分组选择。 */
+.board-sep .sep-add{display:none}
+@media (hover:hover) and (pointer:fine){
+  .board-sep .sep-add{display:inline-flex}
+}
+
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(219px,1fr));gap:12px}
 .grid[data-cols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
 .grid[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -789,6 +796,7 @@ select.sel{
 }
 select.sel:focus{border-color:rgba(120,170,255,.55)}
 select.sel option{background:#151b2c;color:var(--ink)}
+#fGroup{width:100%}
 
 @media (max-width:980px){
   .search-row{gap:9px}
@@ -816,7 +824,8 @@ select.sel option{background:#151b2c;color:var(--ink)}
    不是把桌面版等比缩小。
    ========================================================================== */
 @media (max-width:680px){
-  .app{padding:14px 13px calc(88px + env(safe-area-inset-bottom))}
+  /* 底部留白要容下 FAB（92 + 44 = 136px），否则滚到底时最后一张卡片被压住 */
+  .app{padding:14px 13px calc(150px + env(safe-area-inset-bottom))}
   .topbar{gap:10px;margin-bottom:14px}
   .brand{gap:8px}
   .brand-mark{width:8px;height:20px;border-radius:3px}
@@ -855,8 +864,34 @@ select.sel option{background:#151b2c;color:var(--ink)}
   .card-name{font-size:14px}
   .card-desc{font-size:10.5px;margin-top:1px}
 
+  /* 空分组的占位：不做成「按钮」，做成一块空卡位，别和 FAB 抢注意力 */
+  .board-empty{
+    min-height:68px;border-radius:16px;
+    border:1px dashed rgba(255,255,255,.09);background:none;
+    justify-content:flex-start;padding:0 12px;gap:7px;
+    font-size:12px;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .board-empty .ic{width:14px;height:14px;opacity:.7}
+  .board-empty:active{border-color:rgba(255,255,255,.16);background:rgba(255,255,255,.03)}
+
   /* 悬浮按钮与监控胶囊：都挪到右下角竖排，避开底部安全区 */
-  .fab{right:14px;bottom:calc(84px + env(safe-area-inset-bottom));width:48px;height:48px;border-radius:15px}
+  /* 添加卡片是低频维护动作，不该比卡片本身更醒目：
+     去掉渐变与彩色光晕，改成和顶栏工具按钮同族的玻璃质感 */
+  .fab{
+    right:14px;bottom:calc(92px + env(safe-area-inset-bottom));
+    width:44px;height:44px;border-radius:14px;
+    background:rgba(255,255,255,.055);
+    border:1px solid rgba(255,255,255,.11);
+    box-shadow:0 8px 22px -14px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.07);
+    color:rgba(238,242,255,.60);
+    backdrop-filter:blur(14px) saturate(1.15);
+    -webkit-backdrop-filter:blur(14px) saturate(1.15);
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  .fab .ic{width:19px;height:19px;stroke-width:2}
+  .fab:active{transform:scale(.96);color:rgba(238,242,255,.88);background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.18)}
   body.has-fn .app{padding-right:13px}   /* 胶囊只有 48px，不用再让出 86px */
   .fn-pill{
     right:12px;top:auto;bottom:calc(18px + env(safe-area-inset-bottom));
@@ -886,6 +921,9 @@ select.sel option{background:#151b2c;color:var(--ink)}
   .card:hover .card-glow{opacity:0;visibility:hidden;animation:none}
   .chip:hover,.tool-btn:hover{transform:none}
   .fn-pill:hover{width:48px}
+  /* 新增的玻璃 FAB / 空卡位同样不参与 hover 浮起 */
+  .fab:hover:not(:active){transform:none}
+  .board-empty:hover{border-color:rgba(255,255,255,.09);color:var(--ink-3);background:none}
 }
 
 /* 长按卡片的操作面板（手机上代替拖拽排序） */

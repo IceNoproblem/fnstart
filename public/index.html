@@ -122,12 +122,19 @@
 
 <!-- 卡片编辑 -->
 <div class="modal" id="cardModal" hidden>
-  <div class="modal-card">
+  <div class="modal-card" tabindex="-1">
     <header class="modal-head">
       <h2 id="cardModalTitle">编辑卡片</h2>
       <button class="m-btn" data-close><svg class="ic"><use href="#i-close"/></svg></button>
     </header>
     <div class="preview" id="cardPreview"></div>
+    <div class="field">
+      <label>分组</label>
+      <select class="sel" id="fGroup">
+        <option value="service">容器与服务</option>
+        <option value="bookmark">收藏书签</option>
+      </select>
+    </div>
     <div class="field">
       <label>名称</label>
       <input id="fName" type="text" maxlength="60" placeholder="例如 影视库">

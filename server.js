@@ -112,6 +112,9 @@ const proxyTarget = () => CONFIG.monitorUrl || `http://127.0.0.1:${CONFIG.monito
  *   - 一次性链接：?token=<token>，验证后 302 去掉参数并落 cookie
  */
 const AUTH_COOKIE = 'fnstart_auth';
+/** HTTPS 进来就给 cookie 加 Secure，免得它被明文请求带出去；内网 HTTP 直连不加，否则每次都要重登 */
+const authCookie = (req) =>
+  `${AUTH_COOKIE}=${AUTH_HASH}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_MAX_AGE}${isHttps(req) ? '; Secure' : ''}`;
 const AUTH_MAX_AGE = 30 * 24 * 3600;
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 const AUTH_HASH = CONFIG.accessToken ? sha256(CONFIG.accessToken) : '';
@@ -130,6 +133,11 @@ const hashEq = (a, b) => {
     return false;
   }
 };
+
+/** 这次请求是不是 HTTPS（反代通常用 X-Forwarded-Proto 告诉后端） */
+const isHttps = (req) =>
+  String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https' ||
+  !!(req.socket && req.socket.encrypted);
 
 const parseCookies = (req) => {
   const out = {};
@@ -492,7 +500,7 @@ const server = http.createServer(async (req, res) => {
       const input = form.get('token') || '';
       if (AUTH_HASH && hashEq(sha256(input), AUTH_HASH)) {
         res.writeHead(303, {
-          'Set-Cookie': `${AUTH_COOKIE}=${AUTH_HASH}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_MAX_AGE}`,
+          'Set-Cookie': authCookie(req),
           Location: '/',
           'Cache-Control': 'no-store',
         });
@@ -518,7 +526,7 @@ const server = http.createServer(async (req, res) => {
         const clean = new URL(url);
         clean.searchParams.delete('token');
         res.writeHead(303, {
-          'Set-Cookie': `${AUTH_COOKIE}=${AUTH_HASH}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_MAX_AGE}`,
+          'Set-Cookie': authCookie(req),
           Location: clean.pathname + (clean.search || ''),
           'Cache-Control': 'no-store',
         });

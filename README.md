@@ -1,11 +1,11 @@
 # fnStart · 飞牛开始页
 
-> **一个只给飞牛 NAS 用户准备的浏览器主页。**
+> **一个给飞牛 NAS 用户准备的浏览器主页。**
 > 打开浏览器，你 NAS 上跑的东西全在这一屏：能点、能拖、能改，右边还挂着一块跟着飞牛监控实时跳动的仪表盘。
 
 ![fnStart 界面](docs/screenshot.png)
 
-<p align="center"><sub>↑ 演示数据，不是任何人的真实内网</sub></p>
+<p align="center"><sub>↑ 界面展示</sub></p>
 
 ---
 

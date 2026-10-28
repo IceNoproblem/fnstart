@@ -9,8 +9,6 @@
 
 <p align="center"><sub>↑ 界面展示</sub></p>
 
----
-
 ## 功能和亮点
 
 **打开浏览器，NAS 在干什么全在眼前。** 不用翻收藏夹、不用记端口、不用在几个后台之间来回切。
@@ -48,8 +46,6 @@
 - **一份 JSON 就是全部数据**：`data/` 拷走就等于搬家，也能 `GET /api/export` 导一份
 - **界面字号四档**：小屏、远看、电视上都调得动
 - **想上公网有底子**：访问令牌 + Docker socket 收进只读代理，不是「裸奔着就上线了」
-
----
 
 ## 装它
 
@@ -144,8 +140,6 @@ PORT=3721 DATA_DIR=./data node server.js
 
 </details>
 
----
-
 ## 怎么用
 
 **扫服务** — 顶栏「扫描服务」。第一次打开页面时也会自动跑一次，所以通常你什么都不用点。
@@ -174,7 +168,7 @@ PORT=3721 DATA_DIR=./data node server.js
 这部分有点技术含量，简单说：
 
 1. 读宿主机 `/proc/net/tcp`，拿所有 LISTEN 端口——所以 host 网络的容器也能发现
-2. 每个端口先 TCP 探活，再发一次轻量 HTTP 请求，从 `<title>` 猜服务名；404/报错页会过滤掉，不给你生成"Error"卡片
+2. 每个端口先 TCP 探活，再发一次轻量 HTTP 请求，从 `<title>` 猜服务名；404/报错页会过滤掉，不给你生成 "Error" 卡片
 3. **认容器名**：bridge 容器直接读 Docker API 的端口映射；host 容器没有映射，就反查——端口 → socket inode → 持有它的进程 → 属于哪个容器。这一步要容器能看见宿主机进程表：
 
 ```yaml
@@ -187,8 +181,6 @@ volumes:
 
 4. 图标是运行时去各服务页面抓 favicon，存到 `data/icons/`；抓不到就用名字首字母配个颜色，所以离线也能看。
 
----
-
 ## 配置项
 
 全是环境变量，改 `.env` 或 `docker-compose.yml`。
@@ -196,15 +188,15 @@ volumes:
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `3721` | 监听端口 |
-| `DATA_DIR` | `/data` | 数据目录（卡片、图标、背景、快照） |
+| `DATA_DIR` | `/data` | 数据目录（卡片、图标、背景、快照）|
 | `MONITOR_URL` | 空 | 监控地址。**留空 = 自动用「访问本页的主机名:8777」**，换 IP 不用改 |
 | `MONITOR_PORT` | `8777` | 上面那个自动地址用的端口 |
 | `WEATHER_CITY` | `北京` | 天气默认城市，页面上也能改 |
-| `PUBLIC_HOST` | 空 | 强制卡片地址用这个主机名（反代/域名场景） |
-| `DOCKER_SOCK` | `http://127.0.0.1:2375` | 走 socket 代理。改成 `/var/run/docker.sock` 就是直连（不建议，见下文） |
+| `PUBLIC_HOST` | 空 | 强制卡片地址用这个主机名（反代/域名场景）|
+| `DOCKER_SOCK` | `http://127.0.0.1:2375` | 走 socket 代理。改成 `/var/run/docker.sock` 就是直连（不建议，见下文）|
 | `PROC_ROOT` | 自动 | 宿主机 procfs 挂载点，默认探测 `/host/proc` |
 | `PROBE_TIMEOUT` | `2500` | 单端口探测超时（毫秒），服务多可调 3000 |
-| `PROBE_PORTS` | 空 | 额外扫的端口，逗号分隔（拿不到 `/proc` 时兜底） |
+| `PROBE_PORTS` | 空 | 额外扫的端口，逗号分隔（拿不到 `/proc` 时兜底）|
 | `ACCESS_TOKEN` | 空 | **访问令牌**。留空 = 不校验；要暴露到公网就必须设。用 `./scripts/new-token.sh --write` 生成，写 `.env` |
 | `BLOCK_PRIVATE_FETCH` | 跟随令牌 | 禁止服务端抓内网图标（防 SSRF）。设了令牌会自动开，纯内网想关就显式设 `0`。**注意：自动扫描自己发现的服务不受这条限制** |
 | `POWER_BASE_W` | `8` | 功耗估算里的主板基础开销（主板 + 网卡 + 风扇）。**一般不用改这个，去设置里调** |
@@ -213,8 +205,6 @@ volumes:
 数据全在 `DATA_DIR`：`data.json`（卡片与设置）、`icons/`、`backgrounds/`、`last-monitor.json` / `last-weather.json`（网络抖一下时的兜底快照）。**备份这个目录就等于备份了整个站**，或者 `GET /api/export` 导一份 JSON。
 
 接口想接自动化？都在 `server.js` 的 `handleApi` 里，一眼能看完，我没单独写文档。
-
----
 
 ## 功耗是怎么算的
 
@@ -237,11 +227,9 @@ volumes:
 
 **和飞牛监控的数字对不上？** 正常。它也是这么估的（RAPL 打底 + 经验值补），但两边采样时刻不同、温度测点不同、基础功耗取值也不一样，差个 5~10W 属于正常范围，不是谁算错了。
 
----
-
 ## 要上公网？先看完这节
 
-我不建议你把 3721 直接怼到公网。这不是吓唬人
+我不建议你把 3721 直接怼到公网。这不是吓唬人。
 
 ### 令牌
 
@@ -328,19 +316,15 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 
 容器以 root 运行。这条是架构性的：读宿主 `/proc/<pid>/fd`（把端口反查到进程）要权限，非 root 会让这个功能退化。只在「已经被拿下」之后才有意义，但我不想藏着，写在明处。
 
----
-
 ## 常见问题
 
 **fnMonitor 现在还要不要装？**
 
 不要也能用。1.4 起面板数据是自己采的（读 `/proc` 和 `/sys`），核心指标一个不缺。它只补三样我确实采不到的：硬盘 SMART 详细属性、RAID 阵列卡、IPMI/BMC。
 
-顺带回答当初那个问题——为什么从来没把它写进 compose：它不是容器型应用，是个宿主机监控代理，工作就是摸硬件（`smartctl`、`sensors`、`ipmitool`、`/dev/port`…）。要塞进容器就得 `privileged: true` 挂一堆 `/sys` `/dev`，等于把整台 NAS 交给一个容器，比装 FPK 危险得多。现在两边各走各的，谁升级都不影响谁。
+为什么从来没把它写进 compose：它不是容器型应用，是个宿主机监控代理，工作就是摸硬件——`smartctl` 读 SMART、`sensors` 读温度、`ipmitool` 读 BMC，还要读 `/sys/class/hwmon`、`/proc/*`、`/dev/sd*`，甚至 `/dev/port`（直接读 I/O 端口，兼容 NEC/联想商用机那种走私有 EC 邮箱的风扇）。要塞进容器就得 `privileged: true`、挂一堆 `/sys` `/dev` `/proc` `/vol1/@appcenter`，再装齐那堆工具——**等于把整台 NAS 交给一个容器**，比装 FPK 危险得多，还会丢掉应用中心的升级管理。
 
-问得好，我先试过，放弃了。它不是容器型应用——它是个宿主机监控代理，工作就是摸硬件：`smartctl` 读硬盘 SMART、`sensors` 读温度、`ipmitool` 读 BMC，还要读 `/sys/class/hwmon`、`/proc/*`、`/dev/sd*`，甚至 `/dev/port`（直接读 I/O 端口，兼容 NEC/联想商用机那种走私有 EC 邮箱的风扇）。
-
-要塞进容器就得 `privileged: true`、挂 `/sys` `/dev` `/proc` `/vol1/@appcenter`…再装齐上面那堆工具。**等于把整台 NAS 交给一个容器**，比装 FPK 危险得多，还会丢掉应用中心的升级管理。所以分工是：fnMonitor 用它自己的方式装，fnStart 用容器跑，两边只通过 `:8777/api/overview` 说话。谁升级都不影响谁。
+所以分工是：fnMonitor 用它自己的方式装，fnStart 用容器跑，两边只通过 `:8777/api/overview` 说话。谁升级都不影响谁。
 
 **右边一直是"读不到监控数据"？**
 第 3 步没做，或者 8777 不通。`curl http://你的NAS:8777/api/overview` 试一下。用反代/HTTPS 的话把 `MONITOR_URL` 写死。
@@ -363,8 +347,6 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 **会往外发我的数据吗？**
 不会。唯一的对外请求是天气（open-meteo，只发城市名和坐标）。没有统计、没有遥测、没有回连。
 
----
-
 ## 用了谁的东西
 
 **飞牛监控 fnMonitor** — 右边那块面板的**视觉语言**参考了它（深色底、点阵数字、细计量条）。1.4 起数据改为自己采，它变成可选增强。作者 **Misite齊**（[@MisiteQ](https://github.com/MisiteQ)），MIT 许可，仓库 <https://github.com/MisiteQ/fnmonitor>。纯 Python 标准库 + 单文件前端，零依赖，数据只留在本机 SQLite，确实下了功夫，推荐去点个 star。
@@ -381,15 +363,11 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 
 **没用到的** — React / Vue / Tailwind / 任何 npm 包。`package.json` 的 `dependencies` 是空的，你 `npm install` 会得到 "up to date" 然后无事发生。
 
----
-
 ## 许可
 
 [MIT](LICENSE) © 2026 IceNoproblem
 
 随便用、随便改、随便商用，出事了别找我（MIT 的原话比这长一点，意思一样）。
-
----
 
 ## 最后
 

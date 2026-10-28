@@ -1801,16 +1801,21 @@ function updatePanel(st) {
   setSub('mem', `${st.mem?.usedGB} / ${st.mem?.totalGB} GB · 交换区 ${st.mem?.swapPercent ?? 0}%`);
   setSpark(sh, 'mem', [mem, mem], { min: 0, max: 100 });
 
-  /* 存储 */
+  /* 存储：卡片上用「所有卷的平均占用」，不是挑最满的那个 */
   const disks = st.disks || [];
-  const maxDisk = disks.reduce((a, d) => (d.percent > (a?.percent ?? -1) ? d : a), null);
-  const diskPct = maxDisk?.percent ?? 0;
+  const diskPct = disks.length
+    ? Math.round(disks.reduce((a, d) => a + (Number(d.percent) || 0), 0) / disks.length)
+    : 0;
   setNum('disk', diskPct, 0);
   setBar('disk', diskPct);
   setSt('disk', statText('disk', diskPct));
   const usedTB = disks.reduce((a, d) => a + (d.usedTB || 0), 0);
   const totalTB = disks.reduce((a, d) => a + (d.totalTB || 0), 0);
-  setSub('disk', maxDisk ? `${maxDisk.mount} · ${maxDisk.usedTB}/${maxDisk.totalTB} TB` : '—');
+  // 副标题给汇总容量 + 卷数，具体的每个卷看下面的明细区
+  setSub(
+    'disk',
+    disks.length ? `${disks.length} 个卷 · ${usedTB.toFixed(1)} / ${totalTB.toFixed(1)} TB` : '—',
+  );
 
   /* 网络 */
   const rx = Number(st.net?.rx) || 0;

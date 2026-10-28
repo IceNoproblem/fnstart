@@ -195,6 +195,38 @@ console.log('\n\x1b[1m响应头与信息暴露\x1b[0m');
   nf.status === 404 ? ok('未知接口 404', '') : bad('未知接口', `返回 ${nf.status}`);
 }
 
+/* ---------- 7. docker socket 代理的边界 ---------- */
+console.log('\n\x1b[1mdocker socket 代理\x1b[0m');
+{
+  const DP = process.env.DOCKER_PROXY || 'http://127.0.0.1:2375';
+  const probe = async (method, path) => {
+    try {
+      const r = await fetch(DP + path, { method, signal: AbortSignal.timeout(5000) });
+      await r.text();
+      return r.status;
+    } catch {
+      return 0; // 连不上
+    }
+  };
+  const alive = (await probe('GET', '/version')) === 200;
+  if (!alive) {
+    note('docker socket 代理', `没在 ${DP} 上（可能没用代理，或不在本机），跳过`);
+  } else {
+    const write = await probe('POST', '/containers/create');
+    write === 405 || write === 403
+      ? ok('写操作被拒', `POST /containers/create → ${write}`)
+      : bad('写操作没被拦住', `POST 返回 ${write}`);
+
+    const forbidden = ['/secrets', '/images/json', '/volumes', '/containers/x/export'];
+    const open = [];
+    for (const p of forbidden) {
+      const s = await probe('GET', p);
+      if (s !== 403) open.push(`${p} → ${s}`);
+    }
+    open.length ? bad('敏感端点被放行', open.join('；')) : ok('敏感端点全部 403', '4 个');
+  }
+}
+
 /* ---------- 结果 ---------- */
 console.log('\n' + '─'.repeat(50));
 if (notes.length) notes.forEach((n) => console.log('  · ' + n));

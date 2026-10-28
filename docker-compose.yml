@@ -1,4 +1,31 @@
 services:
+  # Docker socket 的「只读小窗口」。只有它挂 socket，只放行三个 GET 端点，
+  # 其它一律 403（详细说明见 docker-proxy.mjs 顶部）。
+  # 有了它，fnStart 主容器被攻破的后果从「宿主机 root」降到「只能读容器列表」。
+  docker-proxy:
+    build: .
+    image: fnstart:latest
+    container_name: fnstart-docker-proxy
+    restart: unless-stopped
+    # 和主容器一样用 host 网络，这样能绑到 127.0.0.1:2375，
+    # 局域网和公网都碰不到这个代理。
+    network_mode: host
+    command: ["node", "docker-proxy.mjs"]
+    environment:
+      PROXY_LISTEN: 127.0.0.1:2375
+      DOCKER_SOCK_INNER: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # 镜像自带的健康检查探的是主应用的 /api/health，这个容器里没跑那个服务，
+    # 继承下来会永远 unhealthy，所以关掉。
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "1"
+
   fnstart:
     build: .
     image: fnstart:latest
@@ -15,7 +42,9 @@ services:
     environment:
       PORT: 3721
       DATA_DIR: /data
-      DOCKER_SOCK: /var/run/docker.sock
+      # 走 docker-proxy，不直接挂 socket。想退回旧行为就改成 /var/run/docker.sock
+      # （并把下面那行 volumes 里的 socket 挂回来）。
+      DOCKER_SOCK: http://127.0.0.1:2375
       # 探测超时（毫秒），NAS 上服务多可以调到 3000
       PROBE_TIMEOUT: 2500
       # 监控地址留空 = 自动用「访问导航页的主机名:8777」，
@@ -38,8 +67,8 @@ services:
       - SYS_PTRACE
     volumes:
       - ./data:/data
-      # 只读挂载 docker socket：用于列出容器、把端口归属到容器名
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 注意：这里**不挂** docker socket。列容器走上面的 docker-proxy，
+      # 即使本容器被拿下，也拿不到 Docker 的写权限。
       # 只读挂载宿主机 procfs：用于反查 host 网络容器占用的端口。
       # 不挂也能用，只是 host 网络的容器认不出名字，卡片会退回用网页标题命名。
       - /proc:/host/proc:ro

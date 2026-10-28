@@ -10,6 +10,9 @@ set -euo pipefail
 DIR=${FNSTART_DIR:-/vol1/docker/fnstart}
 REPO=${FNSTART_REPO:-https://github.com/IceNoproblem/fnstart.git}
 NAME=fnstart
+PROXY=fnstart-docker-proxy
+# auto = 有 compose 就用 compose；也可以强制 compose / run
+ENGINE=${FNSTART_ENGINE:-auto}
 
 say() { printf '\033[36m›\033[0m %s\n' "$*"; }
 ok() { printf '\033[32m✓\033[0m %s\n' "$*"; }
@@ -47,15 +50,27 @@ fi
 # ---------- 3. 起容器 ----------
 # 老版本可能是用 docker run 起的，没有 compose 标签。compose 会说容器名被占用，
 # 所以先把它拆掉 —— 卡片数据在 $DIR/data 里，容器只是壳子，删了不影响。
-if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
-  proj=$(docker inspect "$NAME" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
-  if [ -z "$proj" ]; then
-    say "检测到旧的 docker run 容器，换成 compose 管理（卡片数据不受影响）"
-    docker rm -f "$NAME" >/dev/null
+for c in "$NAME" "$PROXY"; do
+  if docker ps -a --format '{{.Names}}' | grep -qx "$c"; then
+    proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    if [ -z "$proj" ]; then
+      say "检测到旧的 docker run 容器 $c，重建（卡片数据不受影响）"
+      docker rm -f "$c" >/dev/null
+    fi
   fi
+done
+
+use_compose=0
+if [ "$ENGINE" = compose ]; then
+  docker compose version >/dev/null 2>&1 || die "指定了 compose 但这台机器没有 compose 插件"
+  use_compose=1
+elif [ "$ENGINE" = run ]; then
+  use_compose=0
+elif docker compose version >/dev/null 2>&1; then
+  use_compose=1
 fi
 
-if docker compose version >/dev/null 2>&1; then
+if [ "$use_compose" = 1 ]; then
   say "启动容器（第一次要构建镜像，一两分钟）"
   # 构建日志太吵，只在失败时把最后几行甩出来 —— 成功就安静
   LOG=$(mktemp)
@@ -67,16 +82,26 @@ if docker compose version >/dev/null 2>&1; then
   fi
   rm -f "$LOG"
 else
-  say "启动容器（用 docker run，因为这台机器没有 compose 插件）"
+  say "没有 compose 插件，用 docker run 起两个容器（应用 + socket 代理）"
+  # 1) socket 代理：只有它挂 docker.sock，只放行只读端点
+  docker rm -f "$PROXY" >/dev/null 2>&1 || true
+  docker run -d --name "$PROXY" \
+    --network host --restart unless-stopped \
+    -v "$DIR":/app:ro \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    -w /app -e PROXY_LISTEN=127.0.0.1:2375 \
+    node:22-alpine node docker-proxy.mjs >/dev/null
+
+  # 2) 主应用：**不挂** socket，通过代理读容器列表
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker run -d --name "$NAME" \
     --network host --restart unless-stopped --cap-add=SYS_PTRACE \
     -v "$DIR":/app -v "$DIR/data":/data \
-    -v /var/run/docker.sock:/var/run/docker.sock:ro \
     -v /proc:/host/proc:ro \
     -w /app -e PORT=3721 -e DATA_DIR=/data \
+    -e DOCKER_SOCK=http://127.0.0.1:2375 \
     --env-file <(grep -E '^(ACCESS_TOKEN)=' .env) \
-    node:22-alpine node server.js
+    node:22-alpine node server.js >/dev/null
 fi
 
 # ---------- 4. 结果 ----------
@@ -97,6 +122,7 @@ else
   echo "  令牌：  沿用原来的（grep ACCESS_TOKEN $DIR/.env）"
 fi
 echo
+echo "  安全：  Docker socket 已收进只读代理（$PROXY），主容器碰不到 socket"
 echo "  想要右侧监控面板（可选）："
 echo "    sudo bash $DIR/scripts/install-fnmonitor.sh"
 echo "────────────────────────────────────────"

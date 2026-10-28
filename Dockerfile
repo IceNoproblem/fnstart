@@ -11,6 +11,7 @@ WORKDIR /app
 # 不需要 npm install：项目没有任何第三方依赖
 COPY package.json ./
 COPY server.js ./
+COPY docker-proxy.mjs ./
 COPY lib ./lib
 COPY public ./public
 COPY scripts ./scripts

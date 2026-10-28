@@ -64,6 +64,7 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 | 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，改用下面「其它装法 → docker run」 |
 | 忘了令牌 | `grep ACCESS_TOKEN /vol1/docker/fnstart/.env` |
 | 右侧读不到监控 | `curl http://你的NAS地址:8777/api/overview`；不通就是第 3 步没做 |
+| 卡片没有容器名 | `docker logs fnstart-docker-proxy`，看它有没有起来 |
 | 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
 <details>
@@ -77,14 +78,27 @@ cd /vol1/docker/fnstart
 docker compose up -d --build
 ```
 
-**docker run 一行流**（镜像拉不到时用这个）
+**docker run 两行流**（没有 compose 插件，或镜像拉不到时用这个）
+
+先起 socket 代理（只有它挂 socket）：
+
+```bash
+docker run -d --name fnstart-docker-proxy --network host --restart unless-stopped \
+  -v /vol1/docker/fnstart:/app:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -w /app -e PROXY_LISTEN=127.0.0.1:2375 \
+  node:22-alpine node docker-proxy.mjs
+```
+
+再起主应用（**不挂** socket）：
 
 ```bash
 docker run -d --name fnstart --network host --restart unless-stopped \
   --cap-add=SYS_PTRACE \
   -v /vol1/docker/fnstart:/app -v /vol1/docker/fnstart/data:/data \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro -v /proc:/host/proc:ro \
+  -v /proc:/host/proc:ro \
   -w /app -e PORT=3721 -e DATA_DIR=/data \
+  -e DOCKER_SOCK=http://127.0.0.1:2375 \
   -e ACCESS_TOKEN=你的令牌 \
   node:22-alpine node server.js
 ```
@@ -164,7 +178,7 @@ volumes:
 | `MONITOR_PORT` | `8777` | 上面那个自动地址用的端口 |
 | `WEATHER_CITY` | `北京` | 天气默认城市，页面上也能改 |
 | `PUBLIC_HOST` | 空 | 强制卡片地址用这个主机名（反向代理/域名场景） |
-| `DOCKER_SOCK` | `/var/run/docker.sock` | Docker socket 路径 |
+| `DOCKER_SOCK` | `http://127.0.0.1:2375` | 走 socket 代理。改成 `/var/run/docker.sock` 就是直连（不建议，见上文） |
 | `PROC_ROOT` | 自动 | 宿主机 procfs 挂载点，默认探测 `/host/proc` |
 | `PROBE_TIMEOUT` | `2500` | 单个端口探测超时（毫秒），服务多可调到 3000 |
 | `PROBE_CONCURRENCY` | `8` | 探测并发 |
@@ -230,12 +244,34 @@ BASE=http://127.0.0.1:3721 ACCESS_TOKEN=你的令牌 node scripts/attack-test.mj
 | 3MB 上传 | 413 |
 | 安全响应头 | `nosniff` / `SAMEORIGIN` / `no-store` / `no-referrer` 齐全 |
 
-### 两个要知情的架构性风险
+### Docker socket 已经收进只读代理
 
-这两条不是 bug，是这套架构的固有代价，写在明处：
+要把端口归属反查到容器名，就得读 Docker API。但直接挂 `/var/run/docker.sock` 有个坑：**`:ro` 不等于只读**——实测容器内仍能 `POST /containers/create`。也就是说，主进程一旦被攻破，攻击者就拿得到宿主机 root。
 
-1. **`/var/run/docker.sock` 挂进容器了**（为了把端口归属反查到容器名）。`:ro` **不等于**只读——实测容器内仍能 `POST /containers/create`。也就是说，一旦这个 Node 进程被攻破，攻击者可以拿宿主机 root。想彻底收掉，就套一层只暴露 GET 的 socket proxy，或者在不需要容器名的情况下不挂它。
-2. **容器以 root 运行**，且挂了 `/host/proc`（只读）。同样只在「已经被拿下」之后才有意义。
+所以默认改成两个容器：
+
+```
+fnstart               ← 主应用，完全不挂 socket
+fnstart-docker-proxy  ← 只有它挂 socket，只放行三个 GET，其余一律 403
+                        （绑定 127.0.0.1:2375，局域网和公网都碰不到）
+```
+
+放行的只有 `/version`、`/containers/json`、`/containers/<id>/json` —— 正好是 fnStart 需要的全部。实测拒绝情况：
+
+```
+POST /containers/create   → 405   只允许 GET
+GET  /secrets             → 403
+GET  /images/json         → 403
+GET  /containers/x/export → 403   导出容器文件系统，堵掉
+```
+
+于是「被攻破」的后果从**宿主机 root** 降到**只能读容器列表**。
+
+想退回旧行为（少一个容器、省 10MB 内存），把 compose 里的 `DOCKER_SOCK` 改回 `/var/run/docker.sock`，并把那行 socket 挂载加回主服务。**不建议。**
+
+### 还剩一条：容器以 root 运行
+
+这同样是架构性的：读宿主 `/proc/<pid>/fd`（把端口反查到进程）需要权限，非 root 会让这个功能退化。只在「已经被拿下」之后才有意义，但写在明处。
 
 ### 设一个令牌（最低要求）
 

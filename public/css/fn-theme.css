@@ -223,3 +223,74 @@
     transition: none;
   }
 }
+
+/* ---- 数据过期：保留内容、整体变暗 + 角标，不要整块清空 ---- */
+.fn-wrap { position: relative; transition: opacity .3s var(--ease); }
+.fn-wrap.is-stale { opacity: .5; }
+.fn-wrap.is-stale::after {
+  content: '离线 · 上次数据';
+  position: absolute;
+  /* right 要给面板头部的四个按钮让位，否则角标正好压在按钮上 */
+  top: 2px; right: 132px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(255, 184, 107, .14);
+  color: #ffb86b;
+  letter-spacing: .3px;
+  pointer-events: none;
+}
+
+/* ============ 媒体库区块（只在全屏监控里出现） ============ */
+.fn-mstats{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+  margin:12px 0 10px;
+}
+.fn-mstat{
+  padding:13px 15px;border-radius:14px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+}
+.fn-mstat b{
+  display:block;font-size:24px;font-weight:600;
+  color:var(--ink,#e8e8e4);line-height:1.1;
+  font-variant-numeric:tabular-nums;
+}
+.fn-mstat i{
+  display:block;margin-top:4px;
+  font-style:normal;font-size:11px;color:var(--ink-3,#8a8a85);
+}
+.fn-mcats{
+  display:flex;flex-wrap:wrap;gap:6px;
+  margin-bottom:20px;
+}
+.fn-mcats span{
+  font-size:11.5px;color:var(--ink-3,#8a8a85);
+  background:rgba(255,255,255,.045);
+  padding:4px 10px;border-radius:8px;
+  font-variant-numeric:tabular-nums;
+}
+.fn-mcats b{color:var(--ink-2,#b9b9b4);font-weight:500;margin-right:6px}
+
+.fn-mrecent-title{margin-top:4px}
+.fn-mrecent{display:flex;flex-direction:column;gap:1px}
+.fn-mrow{
+  display:grid;grid-template-columns:80px 1fr auto;
+  gap:12px;align-items:center;
+  padding:7px 2px;font-size:12px;
+  border-bottom:1px solid rgba(255,255,255,.03);
+}
+.fn-mrow:last-child{border-bottom:0}
+.fn-mrow .t{color:var(--ink-3,#8a8a85);font-size:11px;font-variant-numeric:tabular-nums}
+.fn-mrow .n{
+  color:var(--ink-2,#b9b9b4);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.fn-mrow .c{color:var(--ink-3,#8a8a85);font-size:10.5px;opacity:.75}
+
+@media (max-width:900px){
+  .fn-mstats{grid-template-columns:repeat(2,1fr)}
+  .fn-mrow{grid-template-columns:64px 1fr}
+  .fn-mrow .c{display:none}
+}

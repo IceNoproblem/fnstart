@@ -979,3 +979,327 @@ body{font-size:calc(14px * var(--ui-scale))}
 .btn{font-size:calc(13px * var(--ui-scale))}
 .tip,.empty{font-size:calc(12.5px * var(--ui-scale))}
 .ct-row{font-size:calc(12.5px * var(--ui-scale))}
+
+/* ============ 右键菜单 ============ */
+/* 层级放在卡片和模态之下、toast 之下（350 < 400），保证「已复制」这类提示浮在菜单上方 */
+.ctx-menu{
+  position:fixed;z-index:350;min-width:174px;padding:5px;
+  border-radius:12px;
+  background:rgba(20,25,38,.94);
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 20px 50px -14px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter:blur(20px) saturate(1.3);
+  -webkit-backdrop-filter:blur(20px) saturate(1.3);
+  transform-origin:top left;
+  animation:ctxIn .13s var(--ease);
+}
+@keyframes ctxIn{
+  from{opacity:0;transform:scale(.95) translateY(-5px)}
+  to{opacity:1;transform:none}
+}
+.ctx-title{
+  padding:7px 10px 6px;max-width:230px;
+  font-size:calc(11px * var(--ui-scale,1));color:var(--ink-3);letter-spacing:.3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ctx-menu button{
+  display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;
+  border:0;border-radius:8px;background:none;color:var(--ink-2);
+  font:inherit;font-size:calc(13px * var(--ui-scale,1));
+  text-align:left;cursor:pointer;
+  transition:background .14s var(--ease),color .14s;
+}
+.ctx-menu button:hover{background:rgba(255,255,255,.085);color:var(--ink)}
+.ctx-menu button:focus-visible{outline:2px solid rgba(120,170,255,.6);outline-offset:-2px}
+.ctx-menu button .ic{width:14px;height:14px;flex:none;opacity:.75}
+.ctx-menu button:hover .ic{opacity:1}
+.ctx-menu button.danger{color:#ff8a86}
+.ctx-menu button.danger:hover{background:rgba(229,76,74,.15);color:#ffb0ad}
+.ctx-menu .ctx-sep{height:1px;margin:4px 8px;background:rgba(255,255,255,.075)}
+@media (prefers-reduced-motion:reduce){
+  .ctx-menu{animation:none}
+}
+
+/* ============ 顶部顺序（设置 → 外观） ============ */
+.order-list{display:flex;flex-direction:column;gap:6px}
+.order-row{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 10px;border-radius:11px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--line);
+  transition:background .16s var(--ease);
+}
+.order-row:hover{background:rgba(255,255,255,.065)}
+.order-name{
+  flex:1;min-width:0;
+  font-size:calc(13px * var(--ui-scale,1));
+  color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.order-btn{
+  width:28px;height:28px;flex:none;
+  display:grid;place-items:center;
+  border-radius:8px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.05);
+  color:var(--ink-2);
+  font-size:13px;line-height:1;
+  cursor:pointer;
+  transition:background .15s var(--ease),color .15s,border-color .15s;
+}
+.order-btn:hover:not(:disabled){background:rgba(255,255,255,.11);color:var(--ink);border-color:var(--line-2)}
+.order-btn:disabled{opacity:.28;cursor:default}
+
+/* ============ 星期几的字号 ============ */
+/*
+ * 原来 13px，紧挨着 23px 高的点阵日期数字，看着像脚注。
+ * 提到 15px 并跟随「界面字号」；窄屏退回 13.5px，免得把日期卡挤太长。
+ */
+.date-chip .date-week{
+  font-size:calc(15px * var(--ui-scale,1));
+  letter-spacing:.4px;
+  color:var(--ink-2);
+}
+@media (max-width:680px){
+  .date-chip .date-week{font-size:calc(13.5px * var(--ui-scale,1))}
+}
+
+/* ============ 顶部 chip 的弹出面板（天气 / 日历 / 计时器） ============ */
+.popover{
+  position:fixed;z-index:340;
+  min-width:248px;max-width:300px;
+  padding:16px;
+  border-radius:16px;
+  background:rgba(20,25,38,.95);
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 24px 60px -16px rgba(0,0,0,.72),inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter:blur(22px) saturate(1.3);
+  -webkit-backdrop-filter:blur(22px) saturate(1.3);
+  font-size:calc(13px * var(--ui-scale,1));
+  animation:ctxIn .16s var(--ease);
+}
+.pop-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+.pop-title{font-size:calc(15px * var(--ui-scale,1));font-weight:600;color:var(--ink)}
+.pop-sub{font-size:calc(11.5px * var(--ui-scale,1));color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pop-empty{padding:8px 0;font-size:calc(12.5px * var(--ui-scale,1));color:var(--ink-3)}
+.pop-link{
+  display:block;width:100%;margin-top:12px;padding:8px 0;
+  border:1px solid var(--line);border-radius:10px;
+  background:rgba(255,255,255,.05);color:var(--ink-2);
+  font:inherit;font-size:calc(12.5px * var(--ui-scale,1));
+  cursor:pointer;transition:background .15s,color .15s;
+}
+.pop-link:hover{background:rgba(255,255,255,.1);color:var(--ink)}
+.pop-link.danger{color:#ff8a86;border-color:rgba(229,76,74,.3)}
+
+/* ---- 天气 ---- */
+.wx-now{display:flex;align-items:center;gap:10px;margin:2px 0 6px}
+.wx-big{font-size:calc(34px * var(--ui-scale,1));font-weight:300;line-height:1;color:var(--ink);letter-spacing:-1px}
+.wx-ico{font-size:calc(22px * var(--ui-scale,1));line-height:1}
+.wx-desc{font-size:calc(14px * var(--ui-scale,1));color:var(--ink-2)}
+.wx-meta{font-size:calc(11.5px * var(--ui-scale,1));color:var(--ink-3);margin-bottom:12px}
+.wx-list{display:flex;flex-direction:column;gap:1px;border-top:1px solid var(--line);padding-top:8px}
+.wx-row{
+  display:grid;grid-template-columns:40px 20px 1fr auto;
+  align-items:center;gap:8px;
+  padding:6px 4px;border-radius:8px;
+  font-size:calc(12.5px * var(--ui-scale,1));color:var(--ink-2);
+}
+.wx-row.on{background:rgba(255,255,255,.045)}
+.wx-day{color:var(--ink-3);font-size:calc(12px * var(--ui-scale,1))}
+.wx-row.on .wx-day{color:var(--ink-2)}
+.wx-t{text-align:center;font-size:calc(13px * var(--ui-scale,1))}
+.wx-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.wx-range{color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:calc(12px * var(--ui-scale,1))}
+.wx-range b{color:var(--ink);font-weight:600}
+
+/* ---- 日历 ---- */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-title{font-size:calc(13.5px * var(--ui-scale,1));font-weight:600;color:var(--ink)}
+.cal-nav{
+  width:26px;height:26px;display:grid;place-items:center;
+  border:1px solid var(--line);border-radius:8px;
+  background:rgba(255,255,255,.05);color:var(--ink-2);
+  font-size:15px;line-height:1;cursor:pointer;
+  transition:background .15s,color .15s;
+}
+.cal-nav:hover{background:rgba(255,255,255,.11);color:var(--ink)}
+.cal-week,.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-week span{
+  text-align:center;font-size:calc(11px * var(--ui-scale,1));
+  color:var(--ink-3);padding:4px 0;
+}
+.cal-d{
+  aspect-ratio:1;display:grid;place-items:center;
+  font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);
+  border-radius:7px;font-variant-numeric:tabular-nums;
+}
+.cal-d.pad{visibility:hidden}
+.cal-d.today{
+  background:linear-gradient(135deg,rgba(120,170,255,.9),rgba(80,130,230,.9));
+  color:#0b1020;font-weight:700;
+  box-shadow:0 4px 12px -3px rgba(90,140,240,.6);
+}
+
+/* ---- 计时器 ---- */
+.tm-display{
+  text-align:center;font-size:calc(30px * var(--ui-scale,1));font-weight:300;
+  color:var(--ink);letter-spacing:.5px;margin-bottom:14px;
+  font-variant-numeric:tabular-nums;
+}
+.tm-display.idle{font-size:calc(15px * var(--ui-scale,1));color:var(--ink-3);font-weight:400;padding:8px 0}
+.tm-display.done{color:#7de2a8;font-size:calc(22px * var(--ui-scale,1))}
+.tm-presets{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:10px}
+.tm-presets button{
+  padding:7px 0;border:1px solid var(--line);border-radius:8px;
+  background:rgba(255,255,255,.05);color:var(--ink-2);
+  font:inherit;font-size:calc(11.5px * var(--ui-scale,1));
+  cursor:pointer;transition:background .15s,color .15s;
+}
+.tm-presets button:hover{background:rgba(255,255,255,.11);color:var(--ink)}
+.tm-custom{display:flex;gap:6px}
+.tm-custom input{
+  flex:1;min-width:0;padding:7px 10px;
+  border:1px solid var(--line);border-radius:8px;
+  background:rgba(255,255,255,.04);color:var(--ink);
+  font:inherit;font-size:calc(12.5px * var(--ui-scale,1));
+}
+.tm-custom input:focus{outline:none;border-color:var(--line-2);background:rgba(255,255,255,.07)}
+.tm-go{
+  padding:7px 14px;border:1px solid var(--line);border-radius:8px;
+  background:rgba(120,170,255,.16);color:var(--ink);
+  font:inherit;font-size:calc(12.5px * var(--ui-scale,1));
+  cursor:pointer;transition:background .15s;
+}
+.tm-go:hover{background:rgba(120,170,255,.26)}
+@media (max-width:680px){
+  .popover{max-width:calc(100vw - 24px)}
+}
+
+/* ============ 日历：农历 + 节日（覆盖上面的单行格子） ============ */
+.cal-d{
+  min-height:calc(38px * var(--ui-scale,1));
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:3px 1px;border-radius:8px;
+  color:var(--ink-2);
+}
+.cal-d b{
+  font-size:calc(12.5px * var(--ui-scale,1));
+  font-weight:400;line-height:1.2;
+  font-variant-numeric:tabular-nums;
+}
+.cal-d i{
+  font-style:normal;
+  font-size:calc(8.5px * var(--ui-scale,1));
+  line-height:1.15;
+  color:var(--ink-3);
+  max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 节日偏暖、法定假日偏红，区分「放假」和「只是过节」 */
+.cal-d.fest i{color:#e8c07a}
+.cal-d.legal i{color:#ff8a86}
+.cal-d.fest b,.cal-d.legal b{color:var(--ink)}
+.cal-d.today{
+  background:linear-gradient(135deg,rgba(120,170,255,.92),rgba(80,130,230,.92));
+  box-shadow:0 4px 12px -3px rgba(90,140,240,.6);
+}
+.cal-d.today b{color:#0b1020;font-weight:700}
+.cal-d.today i{color:rgba(11,16,32,.72)}
+
+.cal-legend{
+  display:flex;gap:14px;
+  margin-top:9px;padding-top:9px;
+  border-top:1px solid var(--line);
+  font-size:calc(10.5px * var(--ui-scale,1));color:var(--ink-3);
+}
+.cal-legend span{display:flex;align-items:center;gap:5px}
+.cal-legend span::before{
+  content:'';width:6px;height:6px;border-radius:2px;background:currentColor;
+}
+.lg-legal{color:#ff8a86}
+.lg-fest{color:#e8c07a}
+
+/* 计时器：试听按钮 */
+.tm-try{
+  display:block;width:100%;margin-top:9px;padding:7px 0;
+  border:1px solid var(--line);border-radius:8px;
+  background:rgba(255,255,255,.04);color:var(--ink-3);
+  font:inherit;font-size:calc(11.5px * var(--ui-scale,1));
+  cursor:pointer;transition:background .15s,color .15s;
+}
+.tm-try:hover{background:rgba(255,255,255,.09);color:var(--ink-2)}
+
+/* ============ 分组拖拽排序 ============ */
+.board-sep.sep-grab{cursor:grab;user-select:none}
+.board-sep.sep-grab:active{cursor:grabbing}
+/* 拖动中的分组：整体提亮 + 轻微浮起，明确「这个正在被我拿着」 */
+.board.board-dragging{
+  opacity:.92;
+  transform:scale(.995);
+  filter:drop-shadow(0 12px 28px rgba(0,0,0,.5));
+  transition:transform .16s var(--ease),opacity .16s;
+}
+.board.board-dragging .board-sep{color:var(--ink)}
+
+/* ============ 卡片拖拽：跟手 + 主角感 ============ */
+/*
+ * 之前的问题：抓取偏移量没赋值 → left/top 变成 NaN → 卡片其实停在原地不动，
+ * 只有占位框在跳，肉眼根本分不清拖的是哪张。
+ * 现在位置由 transform 驱动（--dx/--dy 由 JS 每帧写），走合成层，跟手且不重排。
+ */
+.card.is-dragging{
+  position:fixed;left:0;top:0;margin:0;z-index:320;
+  pointer-events:none;cursor:grabbing;
+  transform-origin:top left;
+  /*
+   * 只做倾斜和放大；位移交给 JS 写 left/top。
+   * 这里必须 !important：.card:hover / .card:active 的特异性和本规则相同、
+   * 而且声明更靠前，不加的话拖起来会是正正方方一张，看不出"被拎起来了"。
+   */
+  transform:rotate(-1.2deg) scale(1.055) !important;
+  opacity:1;
+  filter:brightness(1.07) saturate(1.05);
+  box-shadow:
+    0 44px 92px -30px rgba(0,0,0,.98),
+    0 0 0 1.5px rgba(255,255,255,.26),
+    0 0 46px -10px rgba(150,190,255,.32);
+  transition:none;
+  will-change:transform;
+}
+
+/* 占位框：明确告诉眼睛「松手会落在这儿」（原来它是个全透明 div，等于没有） */
+.card-ghost{
+  border:1.5px dashed rgba(142,186,255,.55);
+  background:rgba(120,170,255,.07);
+  box-shadow:inset 0 0 26px -6px rgba(120,170,255,.2);
+}
+
+/* 拖动期间把其它卡片压暗：场上只有一张是亮的，指向性最强 */
+body.dragging .card:not(.is-dragging){
+  opacity:.4;
+  filter:saturate(.55) brightness(.82);
+  transition:transform .24s var(--ease),opacity .16s var(--ease),filter .16s var(--ease);
+}
+
+/* 分组被拖动时同理，别让卡片抢注意力 */
+body.dragging .board{transition:opacity .16s var(--ease)}
+
+/* ============ 监控全屏态 ============ */
+/* 全屏时监控占满整行，卡片列宽放大一档，避免被切成细条 */
+body.layout-focus #monPanel{ --metric-min: 400px; }
+
+/* 全屏监控时工具按钮常显：这时候「退出全屏」是唯一出口，藏到 hover 里等于没有 */
+body.layout-focus .mon-tools{ opacity: 1; }
+
+/* ============ 全屏监控：页面上只剩监控本身 ============ */
+/*
+ * 「监控页面全屏」不是浏览器 F11 那种整页全屏，
+ * 而是把页面其它东西（标题栏、搜索、天气时间、卡片）全收起来，只留监控。
+ * 退出靠监控头部那几个按钮。
+ */
+body.layout-focus .topbar,
+body.layout-focus .search-row{ display: none; }
+body.layout-focus .stage{ display: block; min-height: 100vh; padding-top: 22px; }
+body.layout-focus .monitor{ width: 100%; margin: 0; padding-bottom: 32px; }

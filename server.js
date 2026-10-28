@@ -13,6 +13,7 @@ import { handleProxy, handleUpgrade, getMonitorStats } from './lib/proxy.js';
 import { systemSnapshot, warmup } from './lib/metrics.js';
 import { containerStats, startContainerWatcher } from './lib/containers.js';
 import { getWeather } from './lib/weather.js';
+import { mediaStats, resolveMediaRoot } from './lib/media.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -380,6 +381,24 @@ async function handleApi(req, res, url) {
     const id = p.split('/')[3];
     const ok = await store.removeCard(id);
     return json(res, ok ? 200 : 404, { ok });
+  }
+
+  if (/^\/api\/cards\/[^/]+\/duplicate$/.test(p) && method === 'POST') {
+    const id = p.split('/')[3];
+    const body = await readJson(req);
+    const card = await store.duplicateCard(id, body.group);
+    if (!card) return json(res, 404, { ok: false, error: '卡片不存在' });
+    return json(res, 200, { ok: true, card });
+  }
+
+  // 媒体库统计（全屏监控用，结果缓存 5 分钟）
+  if (p === '/api/media' && method === 'GET') {
+    const root = await resolveMediaRoot(CONFIG.mediaRoot);
+    const data = await mediaStats(root, {
+      recentCount: 6,
+      force: url.searchParams.get('force') === '1',
+    });
+    return json(res, 200, data);
   }
 
   if (p === '/api/cards/reorder' && method === 'POST') {

@@ -27,7 +27,9 @@
   <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4h-4"/></symbol>
   <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
-  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></symbol>
+<symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
   <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="15" cy="17" r="1.4"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M5 18l5-5 4 4 2-2 3 3"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4.5 4.5L19 7"/></symbol>
@@ -88,7 +90,12 @@
   </button>
   </div>
 
-  <div class="stage">
+  <!-- 轻量弹窗：点天气/日期/时间时在对应 chip 下方展开 -->
+<div class="popover" id="popover" hidden>
+  <div class="pop-body" id="popBody"></div>
+</div>
+
+<div class="stage">
     <div class="boards" id="boards" aria-label="服务卡片"></div>
 
     <aside class="monitor" id="monitor" hidden>
@@ -99,6 +106,7 @@
         <div class="mon-tools">
           <button class="m-btn" id="mRefresh" title="刷新"><svg class="ic"><use href="#i-refresh"/></svg></button>
           <button class="m-btn" id="mOpen" title="打开原生监控页"><svg class="ic"><use href="#i-external"/></svg></button>
+          <button class="m-btn" id="mFull" title="全屏显示监控"><svg class="ic"><use href="#i-full"/></svg></button>
           <button class="m-btn" id="mCollapse" title="折叠"><svg class="ic"><use href="#i-collapse"/></svg></button>
         </div>
       </div>
@@ -191,6 +199,10 @@
     <div class="tab-panel" data-panel="theme">
       <div class="field"><label>站点标题</label><input id="sTitle" type="text" maxlength="40"></div>
       <div class="field"><label>副标题<small>可选</small></label><input id="sSubtitle" type="text" maxlength="60"></div>
+      <div class="field">
+        <label>顶部顺序<small>天气 / 搜索 / 时间 / 日期，用箭头调前后</small></label>
+        <div class="order-list" id="topOrderList"></div>
+      </div>
       <div class="field">
         <label>界面字号<small>整体放大，小屏或远看时有用</small></label>
         <div class="seg" id="uiScaleSeg">
@@ -348,6 +360,7 @@
 <div class="toast" id="toast" hidden></div>
 <div class="sheet-mask" id="sheetMask" hidden></div>
 
+<script src="/js/lunar.js"></script>
 <script src="/js/app.js" type="module"></script>
 </body>
 </html>

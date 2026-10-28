@@ -319,35 +319,10 @@ function cardEl(card, index, { preview = false } = {}) {
       window.open(card.url, '_blank', 'noopener');
     });
 
-    const acts = document.createElement('div');
-    acts.className = 'card-actions';
-
-    const edit = document.createElement('button');
-    edit.className = 'act';
-    edit.title = '编辑';
-    edit.innerHTML = '<svg class="ic"><use href="#i-edit"/></svg>';
-    edit.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openCardModal(card);
-    });
-
-    const del = document.createElement('button');
-    del.className = 'act danger';
-    del.title = '删除';
-    del.innerHTML = '<svg class="ic"><use href="#i-trash"/></svg>';
-    del.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!confirm(`删除「${card.name}」？`)) return;
-      await api(`/api/cards/${card.id}`, { method: 'DELETE' });
-      state.cards = state.cards.filter((c) => c.id !== card.id);
-      renderBoards();
-      toast('已删除');
-    });
-
-    acts.append(edit, del);
-    node.appendChild(acts);
+    /*
+     * 卡片上不再放编辑/删除按钮：鼠标悬停那两个小按钮挡图标、还容易误点，
+     * 已经由右键菜单接管（桌面）和长按面板接管（手机）。
+     */
   } else {
     node.addEventListener('click', (e) => e.preventDefault());
     node.style.cursor = 'default';
@@ -357,17 +332,31 @@ function cardEl(card, index, { preview = false } = {}) {
 }
 
 /* ---------------- 渲染分组 ---------------- */
-const BOARDS = [
+/*
+ * 分组是数据驱动的：内置「容器与服务」「收藏书签」，用户可以自建任意分组。
+ * 定义存在 settings.groups，顺序就是显示顺序（也支持拖动调整）。
+ */
+const BUILTIN_GROUPS = [
   { key: 'service', label: '容器与服务' },
   { key: 'bookmark', label: '收藏书签' },
 ];
-const groupOf = (c) => c.group || (c.source === 'bookmark' ? 'bookmark' : 'service');
+const groupsOf = () => {
+  const g = state.settings?.groups;
+  return Array.isArray(g) && g.length ? g.filter((x) => x && x.key) : BUILTIN_GROUPS;
+};
+const groupDef = (key) => groupsOf().find((g) => g.key === key) || groupsOf()[0];
+
+/** 卡片属于哪个分组；分组被删掉后残留的 key 归到第一组，不至于凭空消失 */
+const groupOf = (c) => {
+  const g = c.group || (c.source === 'bookmark' ? 'bookmark' : 'service');
+  return groupsOf().some((x) => x.key === g) ? g : groupsOf()[0].key;
+};
 
 function boardEl(key, list, indexStart) {
   const board = document.createElement('section');
   board.className = 'board';
   board.dataset.group = key;
-  const def = BOARDS.find((b) => b.key === key) || BOARDS[0];
+  const def = groupDef(key);
 
   const sep = document.createElement('div');
   sep.className = 'board-sep';
@@ -384,6 +373,19 @@ function boardEl(key, list, indexStart) {
   addBtn.innerHTML = '<svg class="ic"><use href="#i-plus"/></svg>';
   addBtn.addEventListener('click', () => openCardModal(null, key));
   sep.appendChild(addBtn);
+
+  // 分组标题可以拖动排序；右键给重命名/删除
+  sep.classList.add('sep-grab');
+  sep.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.sep-add')) return;
+    startBoardDrag(e, board);
+  });
+  sep.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openCtx(e.clientX, e.clientY, groupMenuItems(key), { title: def.label });
+  });
+
   board.appendChild(sep);
 
   const grid = document.createElement('div');
@@ -412,16 +414,73 @@ function renderBoards() {
   const visible = state.cards.filter((c) => !c.hidden);
   el.boards.innerHTML = '';
   let idx = 0;
-  for (const def of BOARDS) {
+  for (const def of groupsOf()) {
     const list = visible.filter((c) => groupOf(c) === def.key);
-    // 书签组为空时先不占版面，导入后再出现
-    if (!list.length && def.key === 'bookmark') continue;
+    /*
+     * 空分组照常显示 —— 用户刚建的组得能看见，才知道往哪儿放东西。
+     * 原来的「书签组为空就跳过」在自建分组的场景下会让人以为没建成功。
+     */
     el.boards.appendChild(boardEl(def.key, list, idx));
     idx += list.length;
   }
   el.empty.hidden = visible.length > 0;
   if (!visible.length) el.boards.style.display = 'none';
   else el.boards.style.display = '';
+}
+
+/* ---------------- 分组拖拽排序 ---------------- */
+/*
+ * 拖的是分组标题（.board-sep），移动的是整个 section。
+ * 松手后把 DOM 顺序写回 settings.groups —— 卡片顺序不受影响。
+ */
+let boardDrag = null;
+
+function startBoardDrag(e, board) {
+  boardDrag = { board, startY: e.clientY, moved: false, key: board.dataset.group };
+  board.classList.add('board-grab');
+  document.addEventListener('pointermove', moveBoardDrag);
+  document.addEventListener('pointerup', endBoardDrag, { once: true });
+}
+
+function moveBoardDrag(e) {
+  const d = boardDrag;
+  if (!d) return;
+  if (!d.moved) {
+    if (Math.abs(e.clientY - d.startY) < 8) return; // 没动够，当点击处理
+    d.moved = true;
+    d.board.classList.add('board-dragging');
+    document.body.classList.add('dragging');
+  }
+  const others = [...el.boards.querySelectorAll('.board')].filter((b) => b !== d.board);
+  const hit = others.find((b) => {
+    const r = b.getBoundingClientRect();
+    return e.clientY >= r.top && e.clientY <= r.bottom;
+  });
+  if (!hit) return;
+  const r = hit.getBoundingClientRect();
+  const after = e.clientY > r.top + r.height / 2;
+  el.boards.insertBefore(d.board, after ? hit.nextSibling : hit);
+}
+
+async function endBoardDrag() {
+  const d = boardDrag;
+  boardDrag = null;
+  document.removeEventListener('pointermove', moveBoardDrag);
+  if (!d) return;
+  d.board.classList.remove('board-grab', 'board-dragging');
+  document.body.classList.remove('dragging');
+  if (!d.moved) return;
+
+  const order = [...el.boards.querySelectorAll('.board')].map((b) => b.dataset.group);
+  const cur = groupsOf();
+  const next = order.map((k) => cur.find((g) => g.key === k)).filter(Boolean);
+  state.settings.groups = next;
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { groups: next } });
+    toast('分组顺序已保存');
+  } catch {
+    toast('顺序保存失败', true);
+  }
 }
 
 /* ---------------- 拖拽排序（组内 + 跨组） ---------------- */
@@ -441,15 +500,30 @@ function startDrag(e) {
   const card = d.card;
   const rect = card.getBoundingClientRect();
 
+  /*
+   * 抓取点：鼠标按下时落在卡片内的哪个位置。
+   * 必须按「按下的位置」算，不能按当前位置 —— 否则一动卡片就跳一下。
+   * （之前这两个值从来没赋过，clientX - undefined 算出 NaN，
+   *   left/top 被浏览器忽略，卡片其实一直没跟手，只有占位框在动。）
+   */
+  d.offsetX = d.startX - rect.left;
+  d.offsetY = d.startY - rect.top;
+
   const ghost = document.createElement('div');
   ghost.className = 'card-ghost';
   ghost.style.minHeight = `${rect.height}px`;
+  ghost.style.borderRadius = getComputedStyle(card).borderRadius;
   card.parentNode.insertBefore(ghost, card);
   d.ghost = ghost;
 
   card.classList.add('is-dragging');
   card.style.width = `${rect.width}px`;
   card.style.height = `${rect.height}px`;
+  /*
+   * 位置用 left/top 而不是 transform 里的 translate3d(var(--dx)...)：
+   * 实测那套在 Chrome 里算出来是单位矩阵（transform 函数内嵌 CSS 变量时重算有滞后），
+   * 卡片直接定死在 0,0。left/top 虽然会触发重排，但只有一个元素在动，够用且绝对可靠。
+   */
   card.style.left = `${rect.left}px`;
   card.style.top = `${rect.top}px`;
   document.body.classList.add('dragging');
@@ -939,7 +1013,13 @@ function openCardModal(card, group = 'service') {
   renderIconBox();
   renderPreview();
   const gsel = $('#fGroup');
-  if (gsel) gsel.value = editing.draft.group === 'bookmark' ? 'bookmark' : 'service';
+  if (gsel) {
+    // 下拉按当前分组列表动态生成 —— 写死两个选项的话，自定义分组的卡片一编辑就会被挤回内置组
+    gsel.innerHTML = groupsOf()
+      .map((g) => `<option value="${escHtml(g.key)}">${escHtml(g.label)}</option>`)
+      .join('');
+    gsel.value = groupOf(editing.draft);
+  }
   $('#cardModal').hidden = false;
   // 手机上聚焦输入框会立刻唤起软键盘，误触后关掉还得多收一次键盘；
   // 聚焦容器只为了让键盘 / 读屏拿到上下文，还能顺手把弹窗滚到顶。
@@ -1101,7 +1181,7 @@ $('#fSave').addEventListener('click', async () => {
   d.desc = $('#fDesc').value.trim();
   // 以选择器为准：闭包里拿到的 group 可能是打开弹窗时的旧值
   const gsel = $('#fGroup');
-  if (gsel) d.group = gsel.value === 'bookmark' ? 'bookmark' : 'service';
+  if (gsel && gsel.value) d.group = gsel.value;
   try {
     if (editing.id) {
       const r = await api(`/api/cards/${editing.id}`, { method: 'PATCH', body: d });
@@ -1113,7 +1193,7 @@ $('#fSave').addEventListener('click', async () => {
     }
     $('#cardModal').hidden = true;
     renderBoards();
-    toast(d.group === 'bookmark' ? '已保存到 收藏书签' : '已保存到 容器与服务');
+    toast(`已保存到 ${groupDef(d.group).label}`);
   } catch (err) {
     toast(err.message, true);
   }
@@ -1234,7 +1314,7 @@ function openSettings() {
   $('#sGrain').checked = s.background.grain !== false;
   $('#sMonitorStats').checked = s.monitor.showStats !== false;
   $('#sMonEnabled').checked = !!s.monitor.enabled;
-  $('#sMonCollapsed').checked = !!s.monitor.collapsed;
+  $('#sMonCollapsed').checked = monView() === 'collapsed';
   $('#sMonUrl').value = s.monitor.url || '';
   $('#sPowerTdp').value = s.power?.tdpW ?? 0;
   $('#sPowerBase').value = s.power?.baseW ?? 8;
@@ -1251,6 +1331,7 @@ function openSettings() {
   segSet('#bgTypeSeg', s.background.type || 'aurora');
   segSet('#colSeg', String(s.layout?.columns ?? 0));
   segSet('#uiScaleSeg', String(s.ui?.scale ?? 1));
+  renderTopOrder();
   segSet('#monModeSeg', s.monitor.mode || 'direct');
   syncBgFields();
   $('#settingsModal').hidden = false;
@@ -1329,7 +1410,11 @@ $('#sDim').addEventListener('input', (e) => {
 $('#sGrain').addEventListener('change', (e) => saveSettings({ background: { grain: e.target.checked } }));
 $('#sMonitorStats').addEventListener('change', (e) => saveSettings({ monitor: { showStats: e.target.checked } }));
 $('#sMonEnabled').addEventListener('change', (e) => saveSettings({ monitor: { enabled: e.target.checked } }));
-$('#sMonCollapsed').addEventListener('change', (e) => saveSettings({ monitor: { collapsed: e.target.checked } }));
+$('#sMonCollapsed').addEventListener('change', (e) =>
+  saveSettings({
+    monitor: { view: e.target.checked ? 'collapsed' : 'side', collapsed: e.target.checked },
+  }),
+);
 $('#sMonUrl').addEventListener('change', (e) => saveSettings({ monitor: { url: e.target.value.trim() } }).then(() => reloadFrame()));
 
 $('#sWxOn').addEventListener('change', (e) =>
@@ -1455,7 +1540,33 @@ function dotMatrix(host, text) {
     return;
   }
   const W = gl.reduce((a, g) => a + g[0].length, 0) + Math.max(0, gl.length - 1);
-  let out = `<svg viewBox="0 0 ${W} 7" style="--u:${W}" aria-hidden="true">`;
+
+  /*
+   * 增量更新：位宽没变就只切圆点的 class，不重建整棵 SVG。
+   *
+   * 为什么值得改：一个字符是 7 行 × 3~5 列，三个字符就是一百多个 <circle>。
+   * 抖动的末位每 760ms 变一次，一次刷 6 个指标，再加上时钟每秒两次 ——
+   * 按老写法，每秒要创建销毁上千个节点，白烧 CPU 还容易闪。
+   */
+  const svg = host.firstElementChild;
+  if (svg && svg.tagName.toLowerCase() === 'svg' && Number(svg.getAttribute('data-w')) === W) {
+    const dots = svg.children;
+    let i = 0;
+    for (const g of gl) {
+      const w = g[0].length;
+      for (let r = 0; r < 7; r++) {
+        for (let c = 0; c < w; c++) {
+          const dot = dots[i++];
+          if (!dot) return;
+          if (g[r][c] === '#') dot.classList.add('on');
+          else dot.classList.remove('on');
+        }
+      }
+    }
+    return;
+  }
+
+  let out = `<svg viewBox="0 0 ${W} 7" data-w="${W}" style="--u:${W}" aria-hidden="true">`;
   let x = 0;
   for (const g of gl) {
     const w = g[0].length;
@@ -1504,7 +1615,8 @@ function ensureFnShadow() {
         --ink-3:#8a8a85; /* 原来 #64645f 在 #161616 上只有 3.0:1，小字看不清 */
       }
       .fn-wrap{background:transparent}
-      .grid.metrics{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));grid-auto-rows:1fr;gap:10px}
+      /* 列宽走变量：全屏时外面会把它调大，卡片不至于被切成一小条一小条 */
+      .grid.metrics{grid-template-columns:repeat(auto-fit,minmax(var(--metric-min,232px),1fr));grid-auto-rows:1fr;gap:10px}
       /* 卡片不再用实心黑底，改成半透明，浮在页面背景上 */
       .metric{
         min-height:148px;padding:17px 18px 16px;border-radius:20px;
@@ -1629,6 +1741,7 @@ function ensureFnShadow() {
       <div class="grid metrics" id="fnGrid"></div>
       <div class="fn-disk" id="fnDisk"></div>
       <div class="fn-sec" id="fnContainers"></div>
+      <div class="fn-sec" id="fnMedia"></div>
       <div class="fn-foot" id="fnFoot"></div>
     </div>`;
   fnShadow = sh;
@@ -1891,7 +2004,7 @@ function updatePanel(st) {
     const all = cs.list || [];
     // 两列排之后高度砍半，全显示也不长；保留折叠逻辑只是为了极多容器时兜底
     const LIMIT = 26;
-    const expanded = !!view.containersExpanded;
+    const expanded = containersExpanded;
     const list = expanded ? all : all.slice(0, LIMIT);
     const hiddenCount = all.length - list.length;
 
@@ -1932,7 +2045,7 @@ function updatePanel(st) {
       const more = cbox.querySelector('.fn-more');
       if (more) {
         more.onclick = () => {
-          view.containersExpanded = !expanded;
+          containersExpanded = !expanded;
           cbox.dataset.key = ''; // 强制下一轮重建
           if (lastStats) updatePanel(lastStats);
         };
@@ -1979,6 +2092,89 @@ function updatePanel(st) {
   });
 }
 
+/* ---------------- 媒体库（只在全屏监控里出现） ---------------- */
+let mediaData = null;
+let mediaTimer = 0;
+let mediaLoading = false;
+
+async function fetchMedia(force = false) {
+  if (mediaLoading) return;
+  mediaLoading = true;
+  try {
+    const r = await api(`/api/media${force ? '?force=1' : ''}`);
+    if (r && !r.error) mediaData = r;
+  } catch {
+    /* 拉不到就保持上一次的结果 */
+  } finally {
+    mediaLoading = false;
+    renderMedia();
+  }
+}
+
+const fmtSize = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
+
+function renderMedia() {
+  const sh = fnShadow;
+  if (!sh) return;
+  const box = sh.getElementById('fnMedia');
+  if (!box) return;
+
+  // 只有全屏才占版面；其它状态清空，省得卡片区旁边多一块
+  if (!document.body.classList.contains('layout-focus')) {
+    box.innerHTML = '';
+    return;
+  }
+
+  if (!mediaData) {
+    box.innerHTML =
+      '<h5>媒体库<em>统计中</em></h5>' +
+      '<div class="fn-pending">正在数媒体文件，第一次要几秒钟</div>';
+    return;
+  }
+
+  const d = mediaData;
+  const kind = d.byKind || {};
+  const cats = (d.cats || []).filter((c) => c.count > 0);
+  const recent = d.recent || [];
+
+  box.innerHTML =
+    `<h5>媒体库<em>${fmtSize(d.gb || 0)} · ${d.total} 个</em></h5>` +
+    `<div class="fn-mstats">` +
+    `<div class="fn-mstat"><b>${kind.video || 0}</b><i>视频</i></div>` +
+    `<div class="fn-mstat"><b>${kind.image || 0}</b><i>图片</i></div>` +
+    `<div class="fn-mstat"><b>${kind.audio || 0}</b><i>音频</i></div>` +
+    `<div class="fn-mstat"><b>${cats.length}</b><i>分类</i></div>` +
+    `</div>` +
+    `<div class="fn-mcats">` +
+    cats
+      .map((c) => `<span><b>${escHtml(c.name)}</b>${c.count}</span>`)
+      .join('') +
+    `</div>` +
+    `<h5 class="fn-mrecent-title">最近入库<em>按文件修改时间</em></h5>` +
+    (recent.length
+      ? `<div class="fn-mrecent">` +
+        recent
+          .map(
+            (r) =>
+              `<div class="fn-mrow"><span class="t">${escHtml(r.ago)}</span>` +
+              `<span class="n" title="${escHtml(r.name)}">${escHtml(r.name)}</span>` +
+              `<span class="c">${escHtml(r.cat || '')}</span></div>`,
+          )
+          .join('') +
+        `</div>`
+      : '<div class="fn-pending">还没有最近入库</div>');
+}
+
+function startMediaPoll() {
+  stopMediaPoll();
+  fetchMedia();
+  mediaTimer = setInterval(() => fetchMedia(), 60000);
+}
+function stopMediaPoll() {
+  clearInterval(mediaTimer);
+  mediaTimer = 0;
+}
+
 function diskTempMax(st) {
   const list = (st.diskTemps || []).filter((d) => d.temp != null);
   return list.length ? Math.round(Math.max(...list.map((d) => d.temp))) : 0;
@@ -2004,15 +2200,34 @@ function showMonitorError(msg, detail) {
 
 let pendingRetry = false;
 
+/*
+ * 拿不到数据时不要清空面板。
+ * 原来失败就把 .fn-wrap 整个换成「读不到监控数据」，容器一重启（哪怕是部署那 10 秒）
+ * 面板就会白掉再长回来 —— 看着像面板自己消失。现在改成：有旧数据就保留 + 变暗标记，
+ * 只有从来没成功过才显示错误。
+ */
+function markStatsStale(on) {
+  const sh = fnShadow;
+  if (!sh) return;
+  const wrap = sh.querySelector('.fn-wrap');
+  if (wrap) wrap.classList.toggle('is-stale', !!on);
+}
+
 async function fetchStats({ quiet = false } = {}) {
   try {
     const r = await api('/api/monitor/stats');
     if (!r.ok || !r.stats) {
-      if (!quiet) showMonitorError('读不到监控数据', state.settings.monitor.url);
+      if (lastStats) {
+        markStatsStale(true);
+      } else if (!quiet) {
+        showMonitorError('读不到监控数据', state.settings.monitor.url);
+      }
       el.fnStats.innerHTML = '<span style="opacity:.45">—</span>';
       return null;
     }
+    markStatsStale(false);
     lastStats = r.stats;
+    if (document.body.classList.contains('layout-focus') && mediaData) renderMedia();
     // 容器占用是后台采的：第一次可能还没好，1.5 秒后补拉一次（只补一次，不循环）
     if (r.stats.containers?.pending && !pendingRetry) {
       pendingRetry = true;
@@ -2021,11 +2236,12 @@ async function fetchStats({ quiet = false } = {}) {
         fetchStats({ quiet: true });
       }, 1500);
     }
-    if (state.settings.monitor.mode === 'native' && !state.settings.monitor.collapsed) updatePanel(r.stats);
+    if (state.settings.monitor.mode === 'native' && monView() !== 'collapsed') updatePanel(r.stats);
     updateFnStats(r.stats);
     return r.stats;
   } catch (e) {
-    if (!quiet) showMonitorError('监控服务未响应', e.message);
+    if (lastStats) markStatsStale(true);
+    else if (!quiet) showMonitorError('监控服务未响应', e.message);
     return null;
   }
 }
@@ -2055,7 +2271,7 @@ function monitorSrc() {
 
 function reloadFrame() {
   const m = state.settings.monitor;
-  if (m.mode === 'native' || !m.enabled || m.collapsed) return;
+  if (m.mode === 'native' || !m.enabled || monView() === 'collapsed') return;
   const iframe = el.monitorFrame;
   clearTimeout(frameWatchdog);
   const src = monitorSrc();
@@ -2075,20 +2291,34 @@ function reloadFrame() {
 
 /* 能并排显示卡片与监控的最小窗口宽度 */
 const SIDE_MIN = 1200;
-/** 窄窗口下用户手动点开的监控视图（不写进配置，窗口变宽自动失效） */
-const view = { focusMonitor: false };
+
+/*
+ * 监控三态：collapsed（折叠成右侧胶囊）/ side（右侧栏）/ full（覆盖全屏，卡片区让位）。
+ * 老配置只有 boolean 的 collapsed，这里做一次兼容映射。
+ */
+/** 容器列表是否展开显示全部（超过 26 个才有意义） */
+let containersExpanded = false;
+
+const monView = () => {
+  const m = state.settings.monitor || {};
+  if (m.view === 'full' || m.view === 'side' || m.view === 'collapsed') return m.view;
+  return m.collapsed ? 'collapsed' : 'side';
+};
 
 function desiredLayout() {
   const m = state.settings.monitor;
   if (!m.enabled) return 'off';
-  if (window.innerWidth >= SIDE_MIN) return m.collapsed ? 'cards' : 'side';
-  return view.focusMonitor ? 'focus' : 'cards';
+  const v = monView();
+  if (v === 'full') return 'focus'; // 全屏复用 focus 布局：监控占满、卡片隐藏
+  if (v === 'collapsed') return 'cards';
+  // 「展开」在窄窗口放不下并排，退回覆盖式
+  return window.innerWidth >= SIDE_MIN ? 'side' : 'focus';
 }
 
 function applyMonitor() {
   const m = state.settings.monitor;
   const layout = desiredLayout();
-  const sig = [m.enabled, m.collapsed, m.url, m.mode, m.showStats, layout].join('|');
+  const sig = [m.enabled, monView(), m.url, m.mode, m.showStats, layout].join('|');
   const changed = sig !== monitorSig;
   monitorSig = sig;
 
@@ -2124,11 +2354,21 @@ function applyMonitor() {
   el.monPanel.hidden = !native;
   el.monitorFrame.hidden = native;
   const collapseBtn = $('#mCollapse');
-  if (collapseBtn) collapseBtn.title = layout === 'focus' ? '收起监控，回到卡片' : '折叠';
+  if (collapseBtn) collapseBtn.title = monView() === 'full' ? '折叠成胶囊' : '折叠';
+  // 全屏按钮的图标跟着状态走：进全屏时变成「退出」
+  const fullBtn = $('#mFull');
+  if (fullBtn) {
+    const isFull = monView() === 'full';
+    fullBtn.innerHTML = `<svg class="ic"><use href="#${isFull ? 'i-full-exit' : 'i-full'}"/></svg>`;
+    fullBtn.title = isFull ? '退出全屏，回到并排' : '全屏显示监控（隐藏卡片区）';
+  }
   if (native) {
     if (changed || !monBuilt) fetchStats();
     startJitter();
     statsTimer = setInterval(() => fetchStats({ quiet: true }), 5000);
+    // 媒体库统计只在全屏时跑（扫盘有成本，60 秒一次）
+    if (layout === 'focus') startMediaPoll();
+    else stopMediaPoll();
   } else if (changed) {
     reloadFrame();
   }
@@ -2143,7 +2383,7 @@ window.addEventListener('resize', () => {
     const wide = window.innerWidth >= SIDE_MIN;
     if (wide === lastWide) return;
     lastWide = wide;
-    view.focusMonitor = false; // 变宽了就把临时展开状态收掉
+    // 布局是派生的（view + 窗口宽度），跨阈值时重算一次就行，不需要额外状态
     applyMonitor();
   }, 140);
 });
@@ -2153,6 +2393,7 @@ const escHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp
 
 let wxTimer = 0;
 let wxLoadedAt = 0;
+let wxData = null; // 最近一次成功的天气，展开面板时用
 async function loadWeather(force = false) {
   const w = state.settings.weather || {};
   const chip = $('#wxChip');
@@ -2173,6 +2414,7 @@ async function loadWeather(force = false) {
       chip.title = r.error || '天气获取失败';
       return;
     }
+    wxData = r;
     $('#wxIcon').textContent = r.icon || '☀';
     dotMatrix($('#wxTemp'), String(r.temp));
     chip.title = `${r.city} · ${r.text} ${r.temp}°C（体感 ${r.feels}°，湿度 ${r.humidity}%）${r.stale ? ' · 离线缓存' : ''}`;
@@ -2300,7 +2542,7 @@ function renderCardToggles() {
       (c) => `<div class="ct-row${c.hidden ? ' off' : ''}" data-id="${escHtml(c.id)}">
         <span class="ct-ico">${c.icon ? `<img src="${escHtml(c.icon)}" alt="">` : `<span>${escHtml(initial(c.name))}</span>`}</span>
         <span class="ct-name">${escHtml(c.name)}</span>
-        <span class="ct-tag">${groupOf(c) === 'bookmark' ? '书签' : '服务'}</span>
+        <span class="ct-tag">${escHtml(groupDef(groupOf(c)).label)}</span>
         <label class="switch"><input type="checkbox" data-cid="${escHtml(c.id)}"${c.hidden ? '' : ' checked'}><span></span></label>
       </div>`,
     )
@@ -2337,6 +2579,63 @@ for (const [id, key, max] of [
   });
 }
 
+/* ---------------- 顶部顺序 ---------------- */
+/*
+ * 天气 / 搜索栏 / 时间 / 日期 这一排，用 flex 的 order 重排。
+ * 顺序存在 settings.layout.topOrder，缺项或改坏时自动回退默认，不把界面弄乱。
+ */
+const TOP_ITEMS = [
+  { k: 'weather', sel: '.wx-chip', label: '天气' },
+  { k: 'search', sel: '.search-zone', label: '搜索栏' },
+  { k: 'clock', sel: '.clock-chip', label: '时间' },
+  { k: 'date', sel: '.date-chip', label: '日期' },
+];
+const TOP_DEFAULT = ['weather', 'search', 'clock', 'date'];
+const topOrderOf = (v) =>
+  Array.isArray(v) && v.length === TOP_ITEMS.length && TOP_ITEMS.every((it) => v.includes(it.k))
+    ? v
+    : TOP_DEFAULT;
+
+function applyTopOrder(order) {
+  const row = document.querySelector('.search-row');
+  if (!row) return;
+  const list = topOrderOf(order);
+  for (const it of TOP_ITEMS) {
+    const node = row.querySelector(it.sel);
+    if (node) node.style.order = String(list.indexOf(it.k));
+  }
+}
+
+function renderTopOrder() {
+  const box = $('#topOrderList');
+  if (!box) return;
+  const list = topOrderOf(state.settings?.layout?.topOrder);
+  box.innerHTML = list
+    .map((k, i) => {
+      const label = TOP_ITEMS.find((x) => x.k === k)?.label || k;
+      return `<div class="order-row">
+        <span class="order-name">${label}</span>
+        <button type="button" class="order-btn" data-k="${k}" data-d="-1"${i === 0 ? ' disabled' : ''} title="前移">↑</button>
+        <button type="button" class="order-btn" data-k="${k}" data-d="1"${i === list.length - 1 ? ' disabled' : ''} title="后移">↓</button>
+      </div>`;
+    })
+    .join('');
+
+  for (const b of box.querySelectorAll('.order-btn')) {
+    b.addEventListener('click', () => {
+      const cur = [...list];
+      const i = cur.indexOf(b.dataset.k);
+      const j = i + Number(b.dataset.d);
+      if (i < 0 || j < 0 || j >= cur.length) return;
+      [cur[i], cur[j]] = [cur[j], cur[i]];
+      state.settings.layout = { ...(state.settings.layout || {}), topOrder: cur };
+      applyTopOrder(cur); // 先即时生效，别等接口回来
+      renderTopOrder();
+      saveSettings({ layout: { topOrder: cur } });
+    });
+  }
+}
+
 /* 界面字号：四档倍率，存在 settings.ui.scale，用 CSS 变量驱动 */
 function applyUiScale(v) {
   const s = Math.min(1.6, Math.max(0.85, Number(v) || 1));
@@ -2353,12 +2652,11 @@ $$('#uiScaleSeg button').forEach((b) =>
 );
 
 $('#mCollapse').addEventListener('click', () => {
-  if (desiredLayout() === 'focus') {
-    view.focusMonitor = false;
-    applyMonitor();
-    return;
-  }
-  saveSettings({ monitor: { collapsed: true } });
+  saveSettings({ monitor: { view: 'collapsed', collapsed: true } });
+});
+$('#mFull').addEventListener('click', () => {
+  const next = monView() === 'full' ? 'side' : 'full';
+  saveSettings({ monitor: { view: next, collapsed: false } });
 });
 $('#mRefresh').addEventListener('click', () => {
   if (state.settings.monitor.mode === 'native') fetchStats();
@@ -2366,14 +2664,11 @@ $('#mRefresh').addEventListener('click', () => {
 });
 $('#mOpen').addEventListener('click', () => window.open(state.settings.monitor.url, '_blank', 'noopener'));
 $('#fnPill').addEventListener('click', () => {
-  if (window.innerWidth >= SIDE_MIN) {
-    saveSettings({ monitor: { collapsed: false } });
-  } else {
-    view.focusMonitor = true;
-    applyMonitor();
-  }
+  saveSettings({ monitor: { view: 'side', collapsed: false } });
 });
-el.sheetMask.addEventListener('click', () => saveSettings({ monitor: { collapsed: true } }));
+el.sheetMask.addEventListener('click', () =>
+  saveSettings({ monitor: { view: 'collapsed', collapsed: true } }),
+);
 
 /* ---------------- 背景 / 全局应用 ---------------- */
 function applyBackground() {
@@ -2401,6 +2696,7 @@ function applyAll() {
   el.siteSub.textContent = state.settings.subtitle || '';
   document.title = state.settings.siteTitle || '控制台';
   applyUiScale(state.settings.ui?.scale);
+  applyTopOrder(state.settings.layout?.topOrder);
   applyBackground();
   applyEngine();
   applyMonitor();
@@ -2464,25 +2760,603 @@ $$('.tab').forEach((t) =>
 })();
 
 $('#settingsBtn').addEventListener('click', openSettings);
-$('#wxChip')?.addEventListener('click', () => {
-  openSettings();
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'theme'));
-  $$('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== 'theme'));
-  setTimeout(() => $('#sWxCity')?.focus(), 120);
+
+/* ---------------- 右键菜单 ---------------- */
+/*
+ * 接管页面右键：
+ *   卡片上 → 编辑 / 打开 / 复制地址 / 删除
+ *   空白处 → 新建卡片 / 扫描 / 导入 / 设置 / 刷新
+ *
+ * 两个例外要放行原生菜单，否则用户没法复制粘贴：
+ *   输入框、文本域、contenteditable、以及带 data-native-menu 的元素。
+ * 移动端不接这个（那里是长按弹面板，两者会打架）。
+ */
+let ctxNode = null;
+
+const ctxIcon = (id) => `<svg class="ic"><use href="#${id}"/></svg>`;
+
+/** 局域网 http 下 navigator.clipboard 不可用（非安全上下文），要留降级 */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+}
+
+function closeCtx() {
+  if (!ctxNode) return;
+  ctxNode.remove();
+  ctxNode = null;
+  document.removeEventListener('pointerdown', onCtxOutside, true);
+  window.removeEventListener('blur', closeCtx);
+  window.removeEventListener('resize', closeCtx);
+  document.removeEventListener('scroll', closeCtx, true);
+  document.removeEventListener('keydown', onCtxKey, true);
+}
+const onCtxOutside = (e) => {
+  if (ctxNode && !ctxNode.contains(e.target)) closeCtx();
+};
+const onCtxKey = (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCtx();
+  }
+};
+
+/**
+ * @param {number} x 视口坐标
+ * @param {number} y
+ * @param {Array} items { label, icon, run, danger } | { sep: true } | { label, head: true }
+ * @param {{title?: string}} opts
+ */
+let ctxLastPos = { x: 0, y: 0 };
+
+function openCtx(x, y, items, opts = {}) {
+  closeCtx();
+  ctxLastPos = { x, y };
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.setAttribute('role', 'menu');
+
+  if (opts.title) {
+    const h = document.createElement('div');
+    h.className = 'ctx-title';
+    h.textContent = opts.title;
+    menu.appendChild(h);
+  }
+
+  for (const it of items) {
+    if (it.sep) {
+      const d = document.createElement('div');
+      d.className = 'ctx-sep';
+      menu.appendChild(d);
+      continue;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    if (it.danger) b.className = 'danger';
+    b.innerHTML = `${it.icon ? ctxIcon(it.icon) : ''}<span>${it.label}</span>`;
+    b.addEventListener('click', async () => {
+      closeCtx();
+      try {
+        await it.run?.();
+      } catch (err) {
+        toast(err.message || '操作失败', true);
+      }
+    });
+    menu.appendChild(b);
+  }
+
+  menu.style.visibility = 'hidden';
+  document.body.appendChild(menu);
+  ctxNode = menu;
+
+  // 贴边时翻到另一侧，别让菜单跑出屏幕
+  const pad = 8;
+  const r = menu.getBoundingClientRect();
+  let left = x;
+  let top = y;
+  if (left + r.width > window.innerWidth - pad) left = Math.max(pad, x - r.width);
+  if (top + r.height > window.innerHeight - pad) top = Math.max(pad, y - r.height);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.visibility = '';
+
+  document.addEventListener('pointerdown', onCtxOutside, true);
+  window.addEventListener('blur', closeCtx);
+  window.addEventListener('resize', closeCtx);
+  document.addEventListener('scroll', closeCtx, true);
+  document.addEventListener('keydown', onCtxKey, true);
+}
+
+/** 右键卡片：找到当前卡片对象 */
+function cardMenuItems(card) {
+  return [
+    { label: '编辑', icon: 'i-edit', run: () => openCardModal(card) },
+    { label: '新标签页打开', icon: 'i-external', run: () => window.open(card.url, '_blank', 'noopener') },
+    {
+      label: '复制地址',
+      icon: 'i-import',
+      run: async () => toast((await copyText(card.url)) ? '地址已复制' : '复制失败', false),
+    },
+    { sep: true },
+    { label: '移动到…', icon: 'i-move', run: () => pickGroup(card, 'move') },
+    { label: '复制到…', icon: 'i-copy', run: () => pickGroup(card, 'copy') },
+    { sep: true },
+    {
+      label: '删除',
+      icon: 'i-trash',
+      danger: true,
+      run: async () => {
+        if (!confirm(`删除「${card.name}」？`)) return;
+        await api(`/api/cards/${card.id}`, { method: 'DELETE' });
+        state.cards = state.cards.filter((c) => c.id !== card.id);
+        renderBoards();
+        toast('已删除');
+      },
+    },
+  ];
+}
+
+/* ---- 分组操作 ---- */
+
+async function saveGroups(next) {
+  state.settings.groups = next;
+  renderBoards();
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { groups: next } });
+  } catch {
+    toast('分组没保存上', true);
+  }
+}
+
+async function createGroup() {
+  const name = prompt('新分组名称（最多 16 字）');
+  const label = String(name || '').trim().slice(0, 16);
+  if (!label) return;
+  if (groupsOf().some((g) => g.label === label)) {
+    toast('已经有同名分组了', true);
+    return;
+  }
+  // key 用时间戳，和内置的 service/bookmark 不会撞
+  const key = `g${Date.now().toString(36)}`;
+  await saveGroups([...groupsOf(), { key, label }]);
+  toast(`已新建「${label}」`);
+}
+
+async function renameGroup(key) {
+  const g = groupDef(key);
+  const name = prompt('重命名分组', g.label);
+  const label = String(name || '').trim().slice(0, 16);
+  if (!label || label === g.label) return;
+  await saveGroups(groupsOf().map((x) => (x.key === key ? { ...x, label } : x)));
+  toast('已重命名');
+}
+
+async function removeGroup(key) {
+  const all = groupsOf();
+  if (all.length <= 1) {
+    toast('至少得留一个分组', true);
+    return;
+  }
+  const g = groupDef(key);
+  const inside = state.cards.filter((c) => groupOf(c) === key);
+  const target = all.find((x) => x.key !== key);
+  const msg = inside.length
+    ? `删除「${g.label}」？里面的 ${inside.length} 张卡片会挪到「${target.label}」`
+    : `删除空分组「${g.label}」？`;
+  if (!confirm(msg)) return;
+
+  // 先把卡片挪走，再删分组 —— 否则那些卡片的 group 会指向不存在的键
+  for (const c of inside) {
+    try {
+      await api(`/api/cards/${c.id}`, { method: 'PATCH', body: { group: target.key } });
+      c.group = target.key;
+    } catch {
+      /* 单张失败就跳过，别把整个流程卡死 */
+    }
+  }
+  await saveGroups(all.filter((x) => x.key !== key));
+  toast('分组已删除');
+}
+
+/** 右键卡片 → 选择目标分组（移动到 / 复制到共用） */
+function pickGroup(card, mode) {
+  const cur = groupOf(card);
+  const others = groupsOf().filter((g) => g.key !== cur);
+  if (!others.length) {
+    toast('只有一个分组，先新建一个再移动', true);
+    return;
+  }
+  const items = others.map((g) => ({
+    label: g.label,
+    run: () =>
+      mode === 'move' ? moveCardTo(card, g) : copyCardTo(card, g),
+  }));
+  items.push({ sep: true }, { label: '新建分组…', icon: 'i-plus', run: () => createGroup() });
+  openCtx(ctxLastPos.x, ctxLastPos.y, items, { title: mode === 'move' ? '移动到' : '复制到' });
+}
+
+async function moveCardTo(card, g) {
+  await api(`/api/cards/${card.id}`, { method: 'PATCH', body: { group: g.key } });
+  const c = state.cards.find((x) => x.id === card.id);
+  if (c) c.group = g.key;
+  renderBoards();
+  toast(`已移到「${g.label}」`);
+}
+
+async function copyCardTo(card, g) {
+  const r = await api(`/api/cards/${card.id}/duplicate`, { method: 'POST', body: { group: g.key } });
+  if (r.card) state.cards.push(r.card);
+  renderBoards();
+  toast(`已复制到「${g.label}」`);
+}
+
+/** 分组标题上的右键菜单 */
+const groupMenuItems = (key) => [
+  { label: '重命名分组', icon: 'i-edit', run: () => renameGroup(key) },
+  { label: '新建分组…', icon: 'i-plus', run: () => createGroup() },
+  { sep: true },
+  { label: '删除分组', icon: 'i-trash', danger: true, run: () => removeGroup(key) },
+];
+
+const blankMenuItems = () => [
+  { label: '添加服务卡片', icon: 'i-plus', run: () => openCardModal(null, 'service') },
+  { label: '添加书签', icon: 'i-plus', run: () => openCardModal(null, 'bookmark') },
+  { label: '新建分组…', icon: 'i-plus', run: () => createGroup() },
+  { sep: true },
+  { label: '扫描服务', icon: 'i-scan', run: () => $('#scanBtn').click() },
+  { label: '导入书签', icon: 'i-import', run: () => $('#importBtn').click() },
+  { sep: true },
+  { label: '设置', icon: 'i-settings', run: () => openSettings() },
+  { label: '刷新页面', icon: 'i-refresh', run: () => location.reload() },
+];
+
+const nativeMenuAllowed = (t) => {
+  if (!t || t.nodeType !== 1) return false;
+  if (t.closest('input, textarea, select, [contenteditable="true"], [data-native-menu]')) return true;
+  return false;
+};
+
+document.addEventListener('contextmenu', (e) => {
+  // 输入框里保留浏览器原生菜单（复制/粘贴/拼写检查都在那儿）
+  if (nativeMenuAllowed(e.target)) return;
+  e.preventDefault();
+
+  const cardNode = e.target.closest?.('.card[data-id]');
+  if (cardNode) {
+    const card = state.cards.find((c) => c.id === cardNode.dataset.id);
+    if (card) {
+      openCtx(e.clientX, e.clientY, cardMenuItems(card), { title: card.name });
+      return;
+    }
+  }
+  openCtx(e.clientX, e.clientY, blankMenuItems());
 });
-$('#clockChip')?.addEventListener('click', () => {
-  openSettings();
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'theme'));
-  $$('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== 'theme'));
-  setTimeout(() => $('#sTz')?.focus(), 120);
+
+// 键盘用户：Shift+F10 或菜单键，效果等同在焦点处右键
+document.addEventListener('keydown', (e) => {
+  if (!(e.shiftKey && e.key === 'F10') && e.key !== 'ContextMenu') return;
+  const focused = document.activeElement;
+  const card = focused?.closest?.('.card[data-id]');
+  const r = (card || focused || document.body).getBoundingClientRect?.() || { left: 40, top: 40, width: 0, height: 0 };
+  e.preventDefault();
+  if (card) {
+    const obj = state.cards.find((c) => c.id === card.dataset.id);
+    if (obj) return openCtx(r.left + 12, r.top + 12, cardMenuItems(obj), { title: obj.name });
+  }
+  openCtx(r.left + 12, r.top + 12, blankMenuItems());
 });
-// 日期跟时间同一套设置（时区），点它直接进时区那一栏
-$('#dateChip')?.addEventListener('click', () => {
-  openSettings();
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'theme'));
-  $$('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== 'theme'));
-  setTimeout(() => $('#sTz')?.focus(), 120);
-});
+
+/* ---------------- 顶部 chip 的弹出面板 ---------------- */
+/*
+ * 点天气看未来几天、点日期看日历、点时间开计时器。
+ * 三块共用同一个 popover 容器，锚在各自 chip 下方（右侧对齐，贴边会翻到上方）。
+ * 改城市/时区仍然走设置，面板底部留了入口。
+ */
+let popFor = null; // 当前弹出的是哪个 chip
+
+function closePop() {
+  const pop = $('#popover');
+  if (!pop || pop.hidden) return;
+  pop.hidden = true;
+  popFor = null;
+  document.removeEventListener('pointerdown', onPopOutside, true);
+  document.removeEventListener('keydown', onPopKey, true);
+  window.removeEventListener('resize', closePop);
+}
+const onPopOutside = (e) => {
+  const pop = $('#popover');
+  if (pop && !pop.contains(e.target) && !e.target.closest?.('.wx-chip, .clock-chip, .date-chip')) closePop();
+};
+const onPopKey = (e) => {
+  if (e.key === 'Escape') closePop();
+};
+
+function openPop(anchor, kind, build) {
+  const pop = $('#popover');
+  const body = $('#popBody');
+  if (!pop || !body) return;
+  // 再点同一个 chip = 收起
+  if (popFor === kind && !pop.hidden) {
+    closePop();
+    return;
+  }
+  body.innerHTML = '';
+  build(body);
+  pop.hidden = false;
+  popFor = kind;
+
+  const r = anchor.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  let left = r.right - pr.width; // 右对齐：chip 在右侧，往左展开更自然
+  let top = r.bottom + 10;
+  if (left < 8) left = 8;
+  if (left + pr.width > window.innerWidth - 8) left = window.innerWidth - pr.width - 8;
+  if (top + pr.height > window.innerHeight - 8) top = Math.max(8, r.top - pr.height - 10);
+  pop.style.left = `${left}px`;
+  pop.style.top = `${top}px`;
+
+  document.addEventListener('pointerdown', onPopOutside, true);
+  document.addEventListener('keydown', onPopKey, true);
+  window.addEventListener('resize', closePop);
+}
+
+/* ---- 天气详情 ---- */
+function popWeather(anchor) {
+  openPop(anchor, 'weather', (body) => {
+    if (!wxData) {
+      body.innerHTML = '<div class="pop-empty">天气还没取到，稍等一下再点</div>';
+      return;
+    }
+    const d = wxData;
+    const fc = Array.isArray(d.forecast) ? d.forecast : [];
+    const weekOf = (iso, i) => {
+      if (i === 0) return '今天';
+      if (i === 1) return '明天';
+      try {
+        return new Intl.DateTimeFormat('zh-CN', { weekday: 'short', timeZone: 'Asia/Shanghai' }).format(
+          new Date(`${iso}T12:00:00`),
+        );
+      } catch {
+        return iso.slice(5);
+      }
+    };
+    body.innerHTML = `
+      <div class="pop-head">
+        <span class="pop-title">${escHtml(d.city)}</span>
+        <span class="pop-sub">${escHtml(d.region || '')}</span>
+      </div>
+      <div class="wx-now">
+        <span class="wx-big">${d.temp}°</span>
+        <span class="wx-ico">${d.icon || ''}</span>
+        <span class="wx-desc">${escHtml(d.text || '')}</span>
+      </div>
+      <div class="wx-meta">体感 ${d.feels}° · 湿度 ${d.humidity}%${d.stale ? ' · 离线缓存' : ''}</div>
+      ${
+        fc.length
+          ? `<div class="wx-list">${fc
+              .map(
+                (x, i) => `<div class="wx-row${i === 0 ? ' on' : ''}">
+                  <span class="wx-day">${weekOf(x.date, i)}</span>
+                  <span class="wx-t">${x.icon || ''}</span>
+                  <span class="wx-txt">${escHtml(x.text)}</span>
+                  <span class="wx-range"><b>${x.max}°</b> / ${x.min}°</span>
+                </div>`,
+              )
+              .join('')}</div>`
+          : ''
+      }
+      <button class="pop-link" type="button">换个城市</button>`;
+    body.querySelector('.pop-link').addEventListener('click', () => {
+      closePop();
+      openSettings();
+      $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'theme'));
+      $$('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== 'theme'));
+      setTimeout(() => $('#sWxCity')?.focus(), 120);
+    });
+  });
+}
+
+/* ---- 日历 ---- */
+function popCalendar(anchor) {
+  const tz = state.settings.clock?.timezone || 'Asia/Shanghai';
+  // 以目标时区的「今天」为基准，不然跨时区会差一天
+  const nowParts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: tz,
+  }).format(new Date());
+  const [tYear, tMonth, tDay] = nowParts.split('-').map(Number);
+  let viewY = tYear;
+  let viewM = tMonth - 1; // 0-based
+
+  openPop(anchor, 'calendar', (body) => {
+    const draw = () => {
+      // 当月 1 号是周几（0=周日），转成「周一为第一列」
+      const first = new Date(viewY, viewM, 1);
+      const lead = (first.getDay() + 6) % 7;
+      const days = new Date(viewY, viewM + 1, 0).getDate();
+      const isThisMonth = viewY === tYear && viewM === tMonth - 1;
+      const cells = [];
+      for (let i = 0; i < lead; i++) cells.push('<span class="cal-d pad"></span>');
+      for (let d = 1; d <= days; d++) {
+        const today = isThisMonth && d === tDay;
+        const date = new Date(viewY, viewM, d);
+        // 农历：下面那行小字；有节日就显示节日名，没有才显示初几
+        const lu = window.LunarUtil?.lunarOf(date);
+        const fest = window.LunarUtil?.festivalOf(date);
+        const sub = fest ? fest.name : lu ? lu.text : '';
+        const cls = `cal-d${today ? ' today' : ''}${fest ? (fest.legal ? ' legal' : ' fest') : ''}`;
+        const tip = [fest?.name, lu ? `${lu.monthText}${lu.text}` : ''].filter(Boolean).join(' · ');
+        cells.push(
+          `<span class="${cls}"${tip ? ` title="${escHtml(tip)}"` : ''}><b>${d}</b><i>${escHtml(sub)}</i></span>`,
+        );
+      }
+      body.innerHTML = `
+        <div class="cal-head">
+          <button class="cal-nav" data-m="-1" type="button" title="上个月">‹</button>
+          <span class="cal-title">${viewY} 年 ${viewM + 1} 月</span>
+          <button class="cal-nav" data-m="1" type="button" title="下个月">›</button>
+        </div>
+        <div class="cal-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div class="cal-grid">${cells.join('')}</div>
+        <div class="cal-legend"><span class="lg-legal">法定假日</span><span class="lg-fest">节日</span></div>
+        <button class="pop-link" type="button">今天</button>`;
+      for (const b of body.querySelectorAll('.cal-nav')) {
+        b.addEventListener('click', () => {
+          viewM += Number(b.dataset.m);
+          if (viewM < 0) {
+            viewM = 11;
+            viewY--;
+          } else if (viewM > 11) {
+            viewM = 0;
+            viewY++;
+          }
+          draw();
+        });
+      }
+      body.querySelector('.pop-link').addEventListener('click', () => {
+        viewY = tYear;
+        viewM = tMonth - 1;
+        draw();
+      });
+    };
+    draw();
+  });
+}
+
+/* ---- 计时器 ---- */
+const timer = { endAt: 0, iv: 0, mins: 0 };
+
+/** 用 Web Audio 合成三声提示音，不依赖任何音频文件 */
+function playAlarm() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return false;
+    const ctx = new Ctx();
+    ctx.resume?.();
+    const t0 = ctx.currentTime + 0.02;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      const at = t0 + i * 0.42;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.linearRampToValueAtTime(0.3, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.34);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.36);
+    }
+    setTimeout(() => ctx.close?.(), 2000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const fmtLeft = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${m}:${String(ss).padStart(2, '0')}`;
+};
+
+function stopTimer() {
+  if (timer.iv) clearInterval(timer.iv);
+  timer.iv = 0;
+  timer.endAt = 0;
+  timer.mins = 0;
+}
+
+function startTimer(mins) {
+  stopTimer();
+  timer.mins = mins;
+  timer.endAt = Date.now() + mins * 60000;
+  timer.iv = setInterval(() => {
+    const left = timer.endAt - Date.now();
+    if (left <= 0) {
+      stopTimer();
+      playAlarm();
+      toast(`${mins} 分钟到了`);
+      const disp = document.querySelector('#popBody .tm-display');
+      if (disp && !$('#popover')?.hidden) {
+        disp.textContent = '时间到';
+        disp.classList.add('done');
+      } else {
+        closePop();
+      }
+      return;
+    }
+    const disp = document.querySelector('#popBody .tm-display');
+    if (disp && !$('#popover')?.hidden) disp.textContent = fmtLeft(left);
+  }, 250);
+}
+
+function popTimer(anchor) {
+  openPop(anchor, 'timer', (body) => {
+    const running = timer.iv > 0;
+    body.innerHTML = `
+      <div class="tm-display${running ? '' : ' idle'}">${running ? fmtLeft(timer.endAt - Date.now()) : '计时器'}</div>
+      <div class="tm-presets">
+        ${[5, 10, 15, 30, 60].map((m) => `<button type="button" data-min="${m}">${m} 分</button>`).join('')}
+      </div>
+      <div class="tm-custom">
+        <input type="number" min="1" max="600" placeholder="分钟" inputmode="numeric">
+        <button type="button" class="tm-go">开始</button>
+      </div>
+      <button type="button" class="tm-try">试听提示音</button>
+      ${running ? '<button type="button" class="pop-link danger tm-stop">取消计时</button>' : ''}`;
+
+    const begin = (m) => {
+      if (!Number.isFinite(m) || m <= 0) return toast('先填个分钟数', true);
+      startTimer(Math.min(600, Math.round(m)));
+      closePop();
+      toast(`已开始 ${Math.min(600, Math.round(m))} 分钟计时`);
+    };
+    for (const b of body.querySelectorAll('.tm-presets button')) {
+      b.addEventListener('click', () => begin(Number(b.dataset.min)));
+    }
+    body.querySelector('.tm-go').addEventListener('click', () => {
+      begin(Number(body.querySelector('.tm-custom input').value));
+    });
+    body.querySelector('.tm-custom input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') begin(Number(e.target.value));
+    });
+    body.querySelector('.tm-try').addEventListener('click', () => {
+      if (!playAlarm()) toast('这个浏览器不支持播放提示音', true);
+    });
+    body.querySelector('.tm-stop')?.addEventListener('click', () => {
+      stopTimer();
+      closePop();
+      toast('计时已取消');
+    });
+  });
+}
+
+$('#wxChip')?.addEventListener('click', () => popWeather($('#wxChip')));
+$('#dateChip')?.addEventListener('click', () => popCalendar($('#dateChip')));
+$('#clockChip')?.addEventListener('click', () => popTimer($('#clockChip')));
 el.addBtn.addEventListener('click', () => openCardModal(null));
 
 /* ---------------- 标题就地编辑 ---------------- */
@@ -2598,5 +3472,16 @@ async function boot() {
 }
 
 boot();
+
+
+
+
+
+
+
+
+
+
+
 
 

@@ -1236,6 +1236,8 @@ function openSettings() {
   $('#sMonEnabled').checked = !!s.monitor.enabled;
   $('#sMonCollapsed').checked = !!s.monitor.collapsed;
   $('#sMonUrl').value = s.monitor.url || '';
+  $('#sPowerBase').value = s.power?.baseW ?? 8;
+  $('#sPowerDisk').value = s.power?.diskW ?? 8;
   $('#statsLine').textContent = `共 ${state.cards.length} 张卡片，其中 ${state.cards.filter((c) => c.source === 'docker' || c.source === 'system').length} 张来自扫描`;
   const w = s.weather || {};
   $('#sWxOn').checked = w.enabled !== false;
@@ -1540,6 +1542,19 @@ function ensureFnShadow() {
       .metric[data-m="mem"] .m-meter>i{background:linear-gradient(90deg,#B761B1,#e6a3e0)}
       .metric[data-m="disk"] .m-meter>i{background:linear-gradient(90deg,#1F9C86,#68e0c4)}
       .metric[data-m="temp"] .m-meter>i{background:linear-gradient(90deg,#FF8F49,#ffc08a)}
+      /* 温度条：整条就是一把蓝→红的标尺，60℃ 落在正中间（对应 20~100℃ 区间）。
+         已填充部分只是「点亮」到当前温度，颜色由标尺本身决定，不再按阈值换色。 */
+      .metric[data-m="temp"] .m-meter{
+        background:linear-gradient(90deg,
+          #2f6fd0 0%, #4a9eff 18%,
+          #6f9a7a 42%, #d9a13a 58%,
+          #e2711f 78%, #c0342b 100%);
+        box-shadow:inset 0 0 0 1px rgba(255,255,255,.05);
+      }
+      .metric[data-m="temp"] .m-meter>i{
+        background:linear-gradient(90deg,rgba(255,255,255,.62),rgba(255,255,255,.42));
+        box-shadow:0 0 6px rgba(255,255,255,.18);
+      }
       .metric[data-m="pwr"] .m-meter>i{background:linear-gradient(90deg,#BEA4FF,#e2d4ff)}
       /* 网络卡：数字小一点，上下两行 */
       .metric[data-m="net"] .dm{--dm-h:30px}
@@ -1579,10 +1594,11 @@ function ensureFnShadow() {
         color:var(--ink-3);font-weight:500;display:flex;justify-content:space-between;align-items:baseline}
       .fn-sec h5 em{font-style:normal;letter-spacing:0;text-transform:none;font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);font-variant-numeric:tabular-nums}
       /* ---- 容器：单列满宽，每行「状态 + 名字 + CPU + 内存」 ---- */
-      .fn-cgrid{display:flex;flex-direction:column;gap:2px}
+      /* 两列排：25 个容器单列要滚很久，两列一行两个，高度直接砍半 */
+      .fn-cgrid{display:grid;grid-template-columns:1fr 1fr;gap:1px 14px}
       .fn-citem{
-        display:grid;grid-template-columns:10px minmax(0,1fr) 46px 62px;
-        align-items:center;gap:9px;
+        display:grid;grid-template-columns:8px minmax(0,1fr) 34px 40px;
+        align-items:center;gap:6px;
         font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);
         padding:3px 0;min-width:0;border-radius:6px;
       }
@@ -1606,6 +1622,7 @@ function ensureFnShadow() {
         transition:background .2s var(--ease,cubic-bezier(.2,.85,.25,1)),color .2s
       }
       .fn-more:hover{background:rgba(255,255,255,.075);color:var(--ink-2)}
+      .fn-pending{grid-column:1/-1;padding:10px 0;font-size:calc(11.5px * var(--ui-scale,1));color:var(--ink-3)}
     </style>
     <div class="fn-wrap">
       <div class="grid metrics" id="fnGrid"></div>
@@ -1648,8 +1665,8 @@ function fnCardHtml(c) {
     c.key === 'net'
       ? `<div class="m-main" style="grid-column:1/-1">
           <div class="net-vals net-stack">
-            <div class="row"><span class="arr">↓</span><span class="dnum"><span class="dm" data-v="rx">—</span><span class="unit" data-u="rx"></span></span></div>
             <div class="row"><span class="arr">↑</span><span class="dnum"><span class="dm" data-v="tx">—</span><span class="unit" data-u="tx"></span></span></div>
+            <div class="row"><span class="arr">↓</span><span class="dnum"><span class="dm" data-v="rx">—</span><span class="unit" data-u="rx"></span></span></div>
           </div>
           <div class="m-sub" data-sub="${c.key}"></div>
         </div>`
@@ -1703,11 +1720,28 @@ function setSpark(sh, key, values, opt) {
 }
 
 const levelOf = (p) => (p >= 88 ? 'crit' : p >= 72 ? 'warn' : '');
-const levelText = (p, kind) => {
-  if (p >= 88) return kind === 'cpu' ? '高负载' : '偏高';
-  if (p >= 72) return kind === 'cpu' ? '繁忙' : '较满';
-  if (kind === 'cpu') return p < 35 ? '平稳' : '适中';
-  return '正常';
+/*
+ * 每张卡右上角的状态词，按数值真的分档，而不是固定几个词。
+ * 每个指标的量纲和「正常范围」都不一样，所以分开写，不硬套同一个百分比阈值。
+ */
+const STAT_TEXT = {
+  cpu: (v) => (v < 12 ? '空闲' : v < 40 ? '平稳' : v < 70 ? '适中' : v < 90 ? '繁忙' : '满载'),
+  mem: (v) => (v < 45 ? '宽裕' : v < 70 ? '正常' : v < 88 ? '偏紧' : '紧张'),
+  disk: (v) => (v < 50 ? '充足' : v < 72 ? '正常' : v < 88 ? '偏满' : '告急'),
+  temp: (v) => (v < 45 ? '凉爽' : v < 62 ? '正常' : v < 78 ? '偏热' : '过热'),
+  pwr: (v) => (v < 35 ? '省电' : v < 75 ? '常规' : v < 130 ? '偏高' : '高功耗'),
+  net: (v) => {
+    // v 是上下行合计字节/秒
+    if (v < 1024) return '空闲';
+    if (v < 1024 * 1024) return '有流量';
+    if (v < 20 * 1024 * 1024) return '传输中';
+    return '高带宽';
+  },
+};
+const statText = (kind, v) => {
+  const fn = STAT_TEXT[kind];
+  if (!fn) return '—';
+  return Number.isFinite(Number(v)) ? fn(Number(v)) : '无数据';
 };
 
 function updatePanel(st) {
@@ -1736,6 +1770,8 @@ function updatePanel(st) {
     if (!box) return;
     const p = Math.max(0, Math.min(100, Number(pct) || 0));
     box.style.width = `${p}%`;
+    // 温度条自己就是一把蓝→红的标尺（见 CSS），不要在这里按阈值改配色
+    if (key === 'temp') return;
     if (p >= 88) box.style.background = 'linear-gradient(90deg,#E54C4A,#ff8f9c)';
     else if (p >= 72) box.style.background = 'linear-gradient(90deg,#FF8F49,#ffc08a)';
   };
@@ -1744,7 +1780,7 @@ function updatePanel(st) {
   const cpu = Number(st.cpu?.percent) || 0;
   setNum('cpu', cpu, 1);
   setBar('cpu', cpu);
-  setSt('cpu', levelText(cpu, 'cpu'));
+  setSt('cpu', statText('cpu', cpu));
   const cores = st.cpu?.threads || st.cpu?.cores;
   setSub(
     'cpu',
@@ -1760,7 +1796,7 @@ function updatePanel(st) {
   const mem = Number(st.mem?.percent) || 0;
   setNum('mem', mem, 1);
   setBar('mem', mem);
-  setSt('mem', levelText(mem, 'mem'));
+  setSt('mem', statText('mem', mem));
   setSub('mem', `${st.mem?.usedGB} / ${st.mem?.totalGB} GB · 交换区 ${st.mem?.swapPercent ?? 0}%`);
   setSpark(sh, 'mem', [mem, mem], { min: 0, max: 100 });
 
@@ -1770,7 +1806,7 @@ function updatePanel(st) {
   const diskPct = maxDisk?.percent ?? 0;
   setNum('disk', diskPct, 0);
   setBar('disk', diskPct);
-  setSt('disk', levelText(diskPct, 'disk'));
+  setSt('disk', statText('disk', diskPct));
   const usedTB = disks.reduce((a, d) => a + (d.usedTB || 0), 0);
   const totalTB = disks.reduce((a, d) => a + (d.totalTB || 0), 0);
   setSub('disk', maxDisk ? `${maxDisk.mount} · ${maxDisk.usedTB}/${maxDisk.totalTB} TB` : '—');
@@ -1789,21 +1825,30 @@ function updatePanel(st) {
   dotMatrix(tv, txV);
   if (tu) tu.textContent = txU;
   setSub('net', st.net?.rxTotal ? `累计 ↓ ${fmtBytes(st.net.rxTotal)} · ↑ ${fmtBytes(st.net.txTotal || 0)}` : '');
-  setSt('net', rx + tx > 0 ? '有流量' : '空闲');
+  setSt('net', statText('net', rx + tx));
 
   /* 温度 */
   const t = st.temp?.cpu != null ? Number(st.temp.cpu) : NaN;
   setNum('temp', t, 1);
-  if (Number.isFinite(t)) setBar('temp', Math.min(100, t));
-  setSt('temp', !Number.isFinite(t) ? '无数据' : t >= 80 ? '过热' : t >= 65 ? '偏高' : '正常');
+  // 温度条是一把 20~100℃ 的标尺：60℃ 正好落在正中间，和蓝→红渐变的中点对齐
+  if (Number.isFinite(t)) setBar('temp', ((t - 20) / 80) * 100);
+  setSt('temp', statText('temp', t));
   setSub('temp', st.temp?.system != null ? `系统 ${Math.round(st.temp.system)}℃ · 硬盘最高 ${diskTempMax(st)}℃` : '—');
 
   /* 功耗 */
   const pw = st.power?.total || NaN;
   setNum('pwr', pw, 1);
   if (Number.isFinite(pw)) setBar('pwr', Math.min(100, (pw / 150) * 100));
-  setSt('pwr', Number.isFinite(pw) ? '实时' : '无数据');
-  setSub('pwr', st.power?.source ? `来源 ${st.power.source}` : '—');
+  setSt('pwr', statText('pwr', pw));
+  const parts = st.power?.parts;
+  setSub(
+    'pwr',
+    parts
+      ? `CPU ${parts.cpu}W · 内存 ${parts.dram}W · ${parts.diskCount} 块盘 ${parts.disks}W`
+      : st.power?.source
+        ? `来源 ${st.power.source}`
+        : '—',
+  );
 
   /* 存储明细 */
   const dbox = sh.getElementById('fnDisk');
@@ -1836,16 +1881,22 @@ function updatePanel(st) {
   if (cbox) {
     const cs = st.containers || {};
     const all = cs.list || [];
-    // 25 个容器全铺开会把面板拉得老长，底部系统信息被挤走。
-    // 默认只显示前 10 个，剩下的折起来（展开状态跟着 view 走，刷新不重置）
-    const LIMIT = 10;
+    // 两列排之后高度砍半，全显示也不长；保留折叠逻辑只是为了极多容器时兜底
+    const LIMIT = 26;
     const expanded = !!view.containersExpanded;
     const list = expanded ? all : all.slice(0, LIMIT);
     const hiddenCount = all.length - list.length;
 
-    const key = `${cs.total}/${cs.running}/${all.map((c) => c.name).join(',')}/${expanded}`;
+    const key = `${cs.total}/${cs.running}/${all.map((c) => c.name).join(',')}/${expanded}/${cs.pending || false}`;
     if (cbox.dataset.key !== key) {
       cbox.dataset.key = key;
+      // 容器占用是后台采的，刚重启/刚刷新时可能还没拿到第一轮
+      if (!all.length && (cs.pending || !cs.total)) {
+        cbox.innerHTML =
+          `<h5>容器<em>采集中…</em></h5>` +
+          `<div class="fn-cgrid"><div class="fn-pending">正在读取每个容器的占用率，几秒后自动出现</div></div>`;
+        return;
+      }
       cbox.innerHTML =
         `<h5>容器<em>${cs.running ?? 0} / ${cs.total ?? 0} 运行中</em></h5>` +
         `<div class="fn-cgrid">` +
@@ -1904,7 +1955,7 @@ function updatePanel(st) {
       [MON_ICON.sys, '系统', st.os ? `飞牛 ${st.os}` : st.kernel || '—'],
       [MON_ICON.box, '容器', st.containers ? `${st.containers.running} / ${st.containers.total}` : '—'],
       [MON_ICON.cpu, '处理器', (st.cpu?.model || '').replace(/\(R\)|\(TM\)|CPU|@.*/g, '').trim() || '—'],
-      [MON_ICON.gpu, '核显', st.gpu?.name || '—'],
+      [MON_ICON.gpu, '显卡', st.gpu?.name || '—'],
       [MON_ICON.fan, '风扇', st.fans?.length ? `${Math.max(...st.fans)} RPM` : '无'],
       [MON_ICON.up, '运行', fmtUptime(st.uptime).replace('运行 ', '')],
     ];
@@ -1943,6 +1994,8 @@ function showMonitorError(msg, detail) {
   }
 }
 
+let pendingRetry = false;
+
 async function fetchStats({ quiet = false } = {}) {
   try {
     const r = await api('/api/monitor/stats');
@@ -1952,6 +2005,14 @@ async function fetchStats({ quiet = false } = {}) {
       return null;
     }
     lastStats = r.stats;
+    // 容器占用是后台采的：第一次可能还没好，1.5 秒后补拉一次（只补一次，不循环）
+    if (r.stats.containers?.pending && !pendingRetry) {
+      pendingRetry = true;
+      setTimeout(() => {
+        pendingRetry = false;
+        fetchStats({ quiet: true });
+      }, 1500);
+    }
     if (state.settings.monitor.mode === 'native' && !state.settings.monitor.collapsed) updatePanel(r.stats);
     updateFnStats(r.stats);
     return r.stats;
@@ -2253,6 +2314,18 @@ function renderCardToggles() {
       cb.checked = !cb.checked;
     }
   };
+}
+
+/* 功耗估算的硬件参数：改完下一轮刷新就按新值算 */
+for (const [id, key, max] of [
+  ['#sPowerBase', 'baseW', 200],
+  ['#sPowerDisk', 'diskW', 60],
+]) {
+  $(id).addEventListener('change', (e) => {
+    const v = Math.max(0, Math.min(max, Math.round(Number(e.target.value) || 0)));
+    e.target.value = v;
+    saveSettings({ power: { [key]: v } });
+  });
 }
 
 /* 界面字号：四档倍率，存在 settings.ui.scale，用 CSS 变量驱动 */

@@ -76,9 +76,11 @@ services:
       # RAPL 功耗都从这里读。不挂的话温度、风扇、功耗会显示「无数据」，
       # CPU 使用率/内存/网络/磁盘依然正常（那些来自 /proc）。
       - /sys:/host/sys:ro
-      # 想看到 /vol2、/vol3 等其它存储空间，按下面格式各加一行（只读）：
-      # - /vol2:/host/vol2:ro
-      # - /vol3:/host/vol3:ro
+      # 其它存储空间（/vol2、/vol3…）不写死在这里 —— 每台机器有几个卷不一样，
+      # 写死会让没有该卷的机器上凭空多出一个空目录。
+      # install.sh 会探测宿主机实际存在的 /volN，自动生成
+      # docker-compose.override.yml 把它们挂进来；手动部署的话按下面格式自己加：
+      #   - /vol2:/host/vol2:ro
     logging:
       driver: json-file
       options:

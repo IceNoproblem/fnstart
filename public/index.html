@@ -275,7 +275,16 @@
           <button data-v="proxy">代理嵌入</button>
         </div>
       </div>
-      <p class="tip">融合面板用的是飞牛监控的 <code>/api/overview</code> 接口，不依赖页面能否被 iframe 嵌入，深色背景下也没有白色方块。</p>
+      <p class="tip">融合面板的数据是自己采的（读宿主 <code>/proc</code> 和 <code>/sys</code>），不需要装飞牛监控；嵌入原页才需要那个地址。</p>
+      <div class="field row">
+        <label>主板基础功耗 <small>主板+网卡+风扇</small>
+          <input id="sPowerBase" type="number" min="0" max="200" step="1" value="8" style="width:70px"> W
+        </label>
+        <label>单块硬盘 <small>机械盘约 8W，全闪 4~5W</small>
+          <input id="sPowerDisk" type="number" min="0" max="60" step="1" value="8" style="width:70px"> W
+        </label>
+      </div>
+      <p class="tip">功耗 = RAPL 实测（CPU + 内存）+ 上面两项折算。RAPL 测不到主板和硬盘，所以这终究是估算，不是电表读数。</p>
     </div>
 
     <div class="tab-panel" data-panel="cards" hidden>

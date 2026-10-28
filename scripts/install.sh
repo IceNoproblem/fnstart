@@ -60,6 +60,31 @@ for c in "$NAME" "$PROXY"; do
   fi
 done
 
+# ---------- 3.1 存储空间：探测宿主机实际有哪些 /volN，生成挂载覆盖 ----------
+# 面板要显示每个存储空间的容量，容器就得看得见它们。写死在 compose 里会让
+# 没有该卷的机器上凭空出现空目录，所以按机器实际情况生成 override。
+VOLS=""
+for v in /vol1 /vol2 /vol3 /vol4 /vol5 /vol6 /vol7 /vol8; do
+  [ -d "$v" ] && VOLS="$VOLS $v"
+done
+if [ -n "$VOLS" ]; then
+  OVR="$DIR/docker-compose.override.yml"
+  {
+    echo "# 由 install.sh 自动生成：把宿主机上存在的存储空间只读挂进容器，"
+    echo "# 供监控面板读取各卷容量。换机器/加卷后重新跑一次 install.sh 即可。"
+    echo "# 手改会被下次安装覆盖。"
+    echo "services:"
+    echo "  fnstart:"
+    echo "    volumes:"
+    for v in $VOLS; do
+      echo "      - $v:/host$v:ro"
+    done
+  } > "$OVR"
+  say "检测到存储空间：$VOLS"
+else
+  rm -f "$DIR/docker-compose.override.yml" 2>/dev/null || true
+fi
+
 use_compose=0
 if [ "$ENGINE" = compose ]; then
   docker compose version >/dev/null 2>&1 || die "指定了 compose 但这台机器没有 compose 插件"
@@ -97,7 +122,8 @@ else
   docker run -d --name "$NAME" \
     --network host --restart unless-stopped --cap-add=SYS_PTRACE \
     -v "$DIR":/app -v "$DIR/data":/data \
-    -v /proc:/host/proc:ro \
+    -v /proc:/host/proc:ro -v /sys:/host/sys:ro \
+    $(for v in $VOLS; do printf -- "-v %s:/host%s:ro " "$v" "$v"; done) \
     -w /app -e PORT=3721 -e DATA_DIR=/data \
     -e DOCKER_SOCK=http://127.0.0.1:2375 \
     --env-file <(grep -E '^(ACCESS_TOKEN)=' .env) \

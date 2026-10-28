@@ -11,7 +11,7 @@ import { discoverWithIcons, fetchIcon, rawGet } from './lib/discover.js';
 import { parseAny } from './lib/bookmarks.js';
 import { handleProxy, handleUpgrade, getMonitorStats } from './lib/proxy.js';
 import { systemSnapshot, warmup } from './lib/metrics.js';
-import { containerStats } from './lib/containers.js';
+import { containerStats, startContainerWatcher } from './lib/containers.js';
 import { getWeather } from './lib/weather.js';
 
 const MIME = {
@@ -464,8 +464,12 @@ async function handleApi(req, res, url) {
      * 任何异常都吞掉并回落到 fnMonitor —— 少个传感器不该让整块面板空着。
      */
     try {
-      const snap = await systemSnapshot();
-      snap.containers = await containerStats();
+      const snap = await systemSnapshot({
+        powerBaseW: s.settings.power?.baseW,
+        powerDiskW: s.settings.power?.diskW,
+      });
+      // 容器占用走缓存，不等采集（首次会返回 pending，前端显示「采集中」）
+      snap.containers = await containerStats({ wait: false });
       // 面板的「来源」标记：自采时不显示外部依赖
       snap.source = 'native';
       stats = snap;
@@ -651,6 +655,8 @@ server.on('upgrade', async (req, socket, head) => {
 await store.load();
 // 预热：CPU / 网络 / 功耗都是差分型指标，先采一次底，第一次打开面板就有值
 warmup().catch(() => {});
+// 容器资源占用放后台常驻采，别堵在请求路径里（单个 stats 要 1 秒，25 个等不起）
+startContainerWatcher();
 server.listen(CONFIG.port, '0.0.0.0', () => {
   console.log(`[fnstart] 已启动 → http://0.0.0.0:${CONFIG.port}`);
   console.log(`[fnstart] 数据目录 ${CONFIG.dataDir}`);

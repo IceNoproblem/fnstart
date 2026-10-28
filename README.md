@@ -382,6 +382,9 @@ Tailscale / WireGuard 组网之后，出门也能直接开 `http://100.x.x.x:372
 **忘了令牌怎么办？**
 `grep ACCESS_TOKEN .env`；`.env` 也没了就读容器环境变量：`docker inspect fnstart --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ACCESS_TOKEN`。都找不到就换一把新的，卡片数据不受影响。
 
+**改了代码为什么没生效？**
+`docker restart` 只重启进程，不换代码——`/app` 里的文件是构建进镜像的，不是挂载的。改完源码必须 `docker compose up -d --build`。判断依据：`docker exec fnstart grep 新函数名 /app/lib/xxx.js`，搜不到就是没重建。
+
 **改了设置为什么不生效？**
 `data/data.json` 里存着呢，重启容器当然还在。如果改的是 `data.json` 文件本身，需要重启容器（进程内有一份缓存）。
 

@@ -320,6 +320,10 @@ async function bootstrapIfEmpty(host) {
             desc: s.container,
             source: s.source,
             container: s.container,
+            // 必须带 port：判重键在「有端口」时用 port:xxxx，没有时退回 url:xxx。
+            // 这里漏过一次，导致首屏自动采集写一批 port=0 的卡，
+            // 之后手动扫描写一批带端口的，两批判重键不同 → 同一服务两张卡。
+            port: s.port,
           })),
         );
         const st = store.getState();
@@ -404,12 +408,17 @@ async function handleApi(req, res, url) {
         })),
       );
       addedCount = added.length;
+      // 顺手收拾历史脏数据：同 URL 的服务卡只留一张（旧版本漏传 port 留下的）
+      const deduped = await store.dedupeServiceCards();
       const st = store.getState();
       st.meta.lastDiscovery = Date.now();
       st.meta.lastDiscoveryCount = result.services.length;
       await store.save();
+      return json(res, 200, { ...result, added: addedCount, deduped });
     }
-    return json(res, 200, { ...result, added: addedCount });
+    // 即便这次一个服务都没发现，也把已有的重复清一遍
+    const deduped = apply ? await store.dedupeServiceCards() : 0;
+    return json(res, 200, { ...result, added: addedCount, deduped });
   }
 
   // 书签导入

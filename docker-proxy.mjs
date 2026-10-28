@@ -28,13 +28,15 @@ const stripVersion = (p) => p.replace(/^\/v\d+(?:\.\d+)?(?=\/)/, '');
 
 /**
  * 白名单。只写正例，不写反例 —— 漏一个 403 无所谓，多放一个就是洞。
- * 这些正好覆盖 fnStart 的全部 Docker 调用：版本协商、列容器、查单个容器详情。
+ * 这些正好覆盖 fnStart 的全部 Docker 调用：
+ *   版本协商、列容器、查单个容器详情、拿容器资源占用（stats 是只读 GET，不带 stream）
  */
 const ALLOWED = [
   /^\/_ping$/,
   /^\/version$/,
   /^\/containers\/json$/,
   /^\/containers\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\/json$/,
+  /^\/containers\/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\/stats$/,
 ];
 
 const denyLog = { last: 0, count: 0 };

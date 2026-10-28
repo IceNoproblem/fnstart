@@ -72,6 +72,13 @@ services:
       # 只读挂载宿主机 procfs：用于反查 host 网络容器占用的端口。
       # 不挂也能用，只是 host 网络的容器认不出名字，卡片会退回用网页标题命名。
       - /proc:/host/proc:ro
+      # 只读挂载宿主机 sysfs：监控面板的 CPU/主板/硬盘温度、风扇转速、
+      # RAPL 功耗都从这里读。不挂的话温度、风扇、功耗会显示「无数据」，
+      # CPU 使用率/内存/网络/磁盘依然正常（那些来自 /proc）。
+      - /sys:/host/sys:ro
+      # 想看到 /vol2、/vol3 等其它存储空间，按下面格式各加一行（只读）：
+      # - /vol2:/host/vol2:ro
+      # - /vol3:/host/vol3:ro
     logging:
       driver: json-file
       options:

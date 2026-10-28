@@ -1247,6 +1247,7 @@ function openSettings() {
   renderCardToggles();
   segSet('#bgTypeSeg', s.background.type || 'aurora');
   segSet('#colSeg', String(s.layout?.columns ?? 0));
+  segSet('#uiScaleSeg', String(s.ui?.scale ?? 1));
   segSet('#monModeSeg', s.monitor.mode || 'direct');
   syncBgFields();
   $('#settingsModal').hidden = false;
@@ -1492,7 +1493,13 @@ function ensureFnShadow() {
     <link rel="stylesheet" href="/css/fn-theme.css">
     <style>
       /* 只做「落位」相关覆盖，视觉全部沿用 fnMonitor 自己的规则 */
-      :host{background:transparent!important;padding:0!important;display:block;font-size:14px}
+      :host{
+        background:transparent!important;padding:0!important;display:block;
+        /* 跟随「界面字号」：这里千万不能声明 --ui-scale 本身，
+           否则会在 shadow 里切断从 <html> 继承下来的值，设置就失效了 */
+        font-size:calc(14px * var(--ui-scale, 1));
+        --ink-3:#8a8a85; /* 原来 #64645f 在 #161616 上只有 3.0:1，小字看不清 */
+      }
       .fn-wrap{background:transparent}
       .grid.metrics{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));grid-auto-rows:1fr;gap:10px}
       /* 卡片不再用实心黑底，改成半透明，浮在页面背景上 */
@@ -1542,31 +1549,63 @@ function ensureFnShadow() {
       .metric[data-m="net"] .net-vals .unit{font-size:10.5px;color:var(--ink-3);align-self:flex-end;margin-bottom:2px}
       .metric[data-m="net"] .net-vals .arr{font-size:11px;color:var(--ink-3);width:10px;text-align:center}
       .metric[data-m="net"] .m-sub{margin-top:8px!important;padding-top:0!important}
-      .fn-foot{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px 18px;
-        margin-top:11px;padding:12px 16px;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);font-size:10px;color:var(--ink-3)}
-      .fn-foot div{display:flex;justify-content:space-between;gap:10px;min-width:0}
+      /* ---- 底部系统信息：每项配图标，两列 ---- */
+      .fn-foot{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;
+        margin-top:11px;padding:14px 16px;border-radius:16px;
+        background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);
+        font-size:calc(12px * var(--ui-scale,1));color:var(--ink-3)}
+      .fn-foot .fi{display:flex;align-items:center;gap:8px;min-width:0}
+      .fn-foot svg{width:14px;height:14px;flex:none;fill:none;stroke:var(--ink-3);
+        stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+      .fn-foot .k{white-space:nowrap;color:var(--ink-3)}
       .fn-foot b{font-weight:500;color:var(--ink-2);font-variant-numeric:tabular-nums;
-        max-width:64%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+      /* ---- 存储：条加粗、字加大，一眼看清用了多少 ---- */
       .fn-disk{margin-top:10px;padding:14px 16px;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
-      .fn-disk h5{margin:0 0 10px;font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3);font-weight:500;display:flex;justify-content:space-between}
-      .fn-disk h5 em{font-style:normal;letter-spacing:0;text-transform:none}
-      .fn-drow{display:flex;align-items:center;gap:9px;font-size:11px;padding:4px 0;color:var(--ink-2)}
-      .fn-drow .dn{width:42px}
-      .fn-drow .db{flex:1;height:5px;border-radius:3px;background:var(--fill-1);overflow:hidden}
-      .fn-drow .db i{display:block;height:100%;border-radius:3px;background:var(--d-p,#8ab4ff)}
-      .fn-drow .dp{width:32px;text-align:right}
-      .fn-drow .dv{width:76px;text-align:right;color:var(--ink-3)}
-      .fn-drow .dt{width:26px;text-align:right;color:var(--ink-3)}
+      .fn-disk h5{margin:0 0 12px;font-size:calc(11px * var(--ui-scale,1));letter-spacing:1.1px;text-transform:uppercase;color:var(--ink-3);font-weight:500;display:flex;justify-content:space-between;align-items:baseline}
+      .fn-disk h5 em{font-style:normal;letter-spacing:0;text-transform:none;font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);font-variant-numeric:tabular-nums}
+      .fn-drow{display:flex;align-items:center;gap:10px;font-size:calc(12.5px * var(--ui-scale,1));padding:7px 0;color:var(--ink-2)}
+      .fn-drow .dn{width:46px;color:var(--ink-2);font-weight:500}
+      .fn-drow .db{flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
+      .fn-drow .db i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#2f8f7a,#4fc3a1);transition:width .9s var(--ease,cubic-bezier(.2,.85,.25,1))}
+      /* 快满了换成暖色，不用红——红是「故障」的语义，这里只是提醒 */
+      .fn-drow.hi .db i{background:linear-gradient(90deg,#c47a22,#f0b04a)}
+      .fn-drow .dp{width:40px;text-align:right;color:var(--ink-1);font-weight:550;font-variant-numeric:tabular-nums;font-size:calc(13px * var(--ui-scale,1))}
+      .fn-drow .dv{width:90px;text-align:right;color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:calc(11px * var(--ui-scale,1));white-space:nowrap}
+      .fn-drow .dt{width:30px;text-align:right;color:var(--ink-3);font-variant-numeric:tabular-nums}
       .fn-sec{margin-top:10px;padding:14px 16px;border-radius:16px;
         background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06)}
-      .fn-sec h5{margin:0 0 10px;font-size:10px;letter-spacing:1.2px;text-transform:uppercase;
+      .fn-sec h5{margin:0 0 10px;font-size:calc(11px * var(--ui-scale,1));letter-spacing:1.1px;text-transform:uppercase;
         color:var(--ink-3);font-weight:500;display:flex;justify-content:space-between;align-items:baseline}
-      .fn-sec h5 em{font-style:normal;letter-spacing:0;text-transform:none}
-      .fn-cgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:7px 14px}
-      .fn-citem{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-2);min-width:0}
-      .fn-citem i{width:5px;height:5px;border-radius:50%;flex:none;background:var(--health-ok,#3BC47B)}
-      .fn-citem.off i{background:var(--ink-3)}
-      .fn-citem b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .fn-sec h5 em{font-style:normal;letter-spacing:0;text-transform:none;font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);font-variant-numeric:tabular-nums}
+      /* ---- 容器：单列满宽，每行「状态 + 名字 + CPU + 内存」 ---- */
+      .fn-cgrid{display:flex;flex-direction:column;gap:2px}
+      .fn-citem{
+        display:grid;grid-template-columns:10px minmax(0,1fr) 46px 62px;
+        align-items:center;gap:9px;
+        font-size:calc(12px * var(--ui-scale,1));color:var(--ink-2);
+        padding:3px 0;min-width:0;border-radius:6px;
+      }
+      .fn-citem:hover{background:rgba(255,255,255,.04)}
+      /* 状态灯：比原来的小圆点大一倍，并带一圈柔光 —— 扫一眼就能看出谁没跑 */
+      .fn-citem .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--health-ok,#3BC47B);
+        box-shadow:0 0 0 3px rgba(59,196,123,.16)}
+      .fn-citem.off .dot{background:transparent;border:1.5px solid var(--ink-3);box-shadow:none}
+      .fn-citem.bad .dot{background:var(--crit,#e54c4a);box-shadow:0 0 0 3px rgba(229,76,74,.2)}
+      .fn-citem .cname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-1);font-weight:400}
+      .fn-citem.off .cname{color:var(--ink-3)}
+      .fn-citem .ccpu,.fn-citem .cmem{text-align:right;font-variant-numeric:tabular-nums;font-size:calc(11.5px * var(--ui-scale,1));color:var(--ink-2)}
+      .fn-citem .ccpu.hot{color:#ff9d5c}
+      .fn-citem .cmem{color:var(--ink-3)}
+      .fn-citem .none{color:var(--ink-3)}
+      /* 「还有 N 个」折叠按钮：低调，不抢戏 */
+      .fn-more{
+        display:block;width:100%;margin-top:8px;padding:5px 0;border-radius:8px;
+        background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06);
+        color:var(--ink-3);font-size:calc(11.5px * var(--ui-scale,1));cursor:pointer;
+        transition:background .2s var(--ease,cubic-bezier(.2,.85,.25,1)),color .2s
+      }
+      .fn-more:hover{background:rgba(255,255,255,.075);color:var(--ink-2)}
     </style>
     <div class="fn-wrap">
       <div class="grid metrics" id="fnGrid"></div>
@@ -1577,6 +1616,32 @@ function ensureFnShadow() {
   fnShadow = sh;
   return sh;
 }
+
+/*
+ * 监控面板底部用的图标。
+ * 必须内联 —— shadow DOM 里的 <use href="#i-x"> 指向不了 document 里的 symbol，
+ * 会渲染成一片空白（这个坑踩过）。
+ */
+const MON_ICON = {
+  sys: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>',
+  box: '<svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/></svg>',
+  cpu: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  gpu: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+  fan: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 10V4M12 14v6M10 12H4M14 12h6"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.4l3 1.8"/></svg>',
+};
+
+/*
+ * 容器 CPU 显示：空闲的容器占 0.0x%，取整会全变成 0%，所以：
+ *   <0.1% 直接写 <0.1%，<10% 保留一位小数，再往上取整。
+ */
+const fmtCpu = (v) => {
+  if (v == null) return '—';
+  if (v <= 0) return '0%';
+  if (v < 0.1) return '<0.1%';
+  if (v < 10) return `${v.toFixed(1)}%`;
+  return `${Math.round(v)}%`;
+};
 
 function fnCardHtml(c) {
   const main =
@@ -1750,7 +1815,7 @@ function updatePanel(st) {
         `<h5>存储<em>${usedTB.toFixed(1)} / ${totalTB.toFixed(1)} TB</em></h5>` +
         disks
           .map(
-            (d) => `<div class="fn-drow" data-m="${d.mount}">
+            (d) => `<div class="fn-drow${d.percent >= 85 ? ' hi' : ''}" data-m="${d.mount}">
               <span class="dn">${d.mount}</span>
               <span class="db"><i style="width:0%"></i></span>
               <span class="dp">${d.percent}%</span>
@@ -1766,39 +1831,86 @@ function updatePanel(st) {
     }
   }
 
-  /* 容器 */
+  /* 容器：单列，每行「状态灯 + 名字 + CPU + 内存」 */
   const cbox = sh.getElementById('fnContainers');
   if (cbox) {
     const cs = st.containers || {};
-    const list = cs.list || [];
-    const key = `${cs.total}/${cs.running}/${list.map((c) => c.name).join(',')}`;
+    const all = cs.list || [];
+    // 25 个容器全铺开会把面板拉得老长，底部系统信息被挤走。
+    // 默认只显示前 10 个，剩下的折起来（展开状态跟着 view 走，刷新不重置）
+    const LIMIT = 10;
+    const expanded = !!view.containersExpanded;
+    const list = expanded ? all : all.slice(0, LIMIT);
+    const hiddenCount = all.length - list.length;
+
+    const key = `${cs.total}/${cs.running}/${all.map((c) => c.name).join(',')}/${expanded}`;
     if (cbox.dataset.key !== key) {
       cbox.dataset.key = key;
       cbox.innerHTML =
         `<h5>容器<em>${cs.running ?? 0} / ${cs.total ?? 0} 运行中</em></h5>` +
         `<div class="fn-cgrid">` +
         list
-          .map(
-            (c) =>
-              `<div class="fn-citem${c.state === 'running' ? '' : ' off'}" title="${c.name}${c.health ? ' · ' + c.health : ''}"><i></i><b>${c.name}</b></div>`,
-          )
+          .map((c) => {
+            const cls = c.state === 'unhealthy' ? 'bad' : c.state === 'running' ? '' : 'off';
+            const cpu = fmtCpu(c.cpu);
+            const mem =
+              c.memMB == null ? '' : c.memMB >= 1024 ? `${(c.memMB / 1024).toFixed(1)}G` : `${c.memMB}M`;
+            const hot = c.cpu != null && c.cpu >= 40 ? ' hot' : '';
+            return `<div class="fn-citem ${cls}" title="${escHtml(c.name)} · ${escHtml(c.health || c.state)}">
+              <span class="dot"></span>
+              <span class="cname">${escHtml(c.name)}</span>
+              <span class="ccpu${hot}">${cpu}</span>
+              <span class="cmem">${mem}</span>
+            </div>`;
+          })
           .join('') +
-        `</div>`;
+        `</div>` +
+        (hiddenCount > 0
+          ? `<button class="fn-more" type="button">还有 ${hiddenCount} 个容器</button>`
+          : all.length > LIMIT
+            ? `<button class="fn-more" type="button">收起</button>`
+            : '');
+      const more = cbox.querySelector('.fn-more');
+      if (more) {
+        more.onclick = () => {
+          view.containersExpanded = !expanded;
+          cbox.dataset.key = ''; // 强制下一轮重建
+          if (lastStats) updatePanel(lastStats);
+        };
+      }
     }
+    // 数值每轮都更新（DOM 不重建，只改文本）。按顺序取，避免用名字拼选择器
+    const items = cbox.querySelectorAll('.fn-citem');
+    list.forEach((c, i) => {
+      const row = items[i];
+      if (!row) return;
+      const cpuEl = row.querySelector('.ccpu');
+      const memEl = row.querySelector('.cmem');
+      if (cpuEl) {
+        cpuEl.textContent = fmtCpu(c.cpu);
+        cpuEl.classList.toggle('hot', c.cpu != null && c.cpu >= 40);
+      }
+      if (memEl) {
+        memEl.textContent =
+          c.memMB == null ? '' : c.memMB >= 1024 ? `${(c.memMB / 1024).toFixed(1)}G` : `${c.memMB}M`;
+      }
+    });
   }
 
-  /* 底部系统信息 */
+  /* 底部系统信息：每项一个图标 */
   const fbox = sh.getElementById('fnFoot');
   if (fbox) {
     const rows = [
-      ['系统', st.os ? `飞牛 ${st.os}` : st.kernel || '—'],
-      ['容器', st.containers ? `${st.containers.running} / ${st.containers.total} 运行中` : '—'],
-      ['处理器', (st.cpu?.model || '').replace(/\(R\)|\(TM\)|CPU|@.*/g, '').trim() || '—'],
-      ['核显', st.gpu?.name || '—'],
-      ['风扇', st.fans?.length ? `${Math.max(...st.fans)} RPM` : '—'],
-      ['运行', fmtUptime(st.uptime).replace('运行 ', '')],
+      [MON_ICON.sys, '系统', st.os ? `飞牛 ${st.os}` : st.kernel || '—'],
+      [MON_ICON.box, '容器', st.containers ? `${st.containers.running} / ${st.containers.total}` : '—'],
+      [MON_ICON.cpu, '处理器', (st.cpu?.model || '').replace(/\(R\)|\(TM\)|CPU|@.*/g, '').trim() || '—'],
+      [MON_ICON.gpu, '核显', st.gpu?.name || '—'],
+      [MON_ICON.fan, '风扇', st.fans?.length ? `${Math.max(...st.fans)} RPM` : '无'],
+      [MON_ICON.up, '运行', fmtUptime(st.uptime).replace('运行 ', '')],
     ];
-    fbox.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    fbox.innerHTML = rows
+      .map(([ico, k, v]) => `<div class="fi">${ico}<span class="k">${k}</span><b>${v}</b></div>`)
+      .join('');
   }
 
   /* 曲线在布局完成后重画一次，保证宽度正确 */
@@ -2143,6 +2255,21 @@ function renderCardToggles() {
   };
 }
 
+/* 界面字号：四档倍率，存在 settings.ui.scale，用 CSS 变量驱动 */
+function applyUiScale(v) {
+  const s = Math.min(1.6, Math.max(0.85, Number(v) || 1));
+  document.documentElement.style.setProperty('--ui-scale', String(s));
+  document.documentElement.dataset.uiScale = String(s);
+}
+
+$$('#uiScaleSeg button').forEach((b) =>
+  b.addEventListener('click', () => {
+    segSet('#uiScaleSeg', b.dataset.v);
+    applyUiScale(b.dataset.v);
+    saveSettings({ ui: { scale: Number(b.dataset.v) } });
+  }),
+);
+
 $('#mCollapse').addEventListener('click', () => {
   if (desiredLayout() === 'focus') {
     view.focusMonitor = false;
@@ -2191,6 +2318,7 @@ function applyAll() {
   }
   el.siteSub.textContent = state.settings.subtitle || '';
   document.title = state.settings.siteTitle || '控制台';
+  applyUiScale(state.settings.ui?.scale);
   applyBackground();
   applyEngine();
   applyMonitor();

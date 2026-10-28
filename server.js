@@ -10,6 +10,8 @@ import * as store from './lib/store.js';
 import { discoverWithIcons, fetchIcon, rawGet } from './lib/discover.js';
 import { parseAny } from './lib/bookmarks.js';
 import { handleProxy, handleUpgrade, getMonitorStats } from './lib/proxy.js';
+import { systemSnapshot, warmup } from './lib/metrics.js';
+import { containerStats } from './lib/containers.js';
 import { getWeather } from './lib/weather.js';
 
 const MIME = {
@@ -451,11 +453,32 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: true, url });
   }
 
-  // 监控实时指标（拿不到时回退到上次成功快照，避免面板整块空白）
+  // 监控实时指标（自采优先；拿不到才退回 fnMonitor；再不行用上次快照）
   if (p === '/api/monitor/stats' && method === 'GET') {
     const s = await store.load();
-    let stats = await getMonitorStats(proxyTarget());
+    let stats = null;
     let stale = false;
+
+    /*
+     * 主路径：自己采。读 /host/proc 与 /host/sys，不依赖任何外部应用。
+     * 任何异常都吞掉并回落到 fnMonitor —— 少个传感器不该让整块面板空着。
+     */
+    try {
+      const snap = await systemSnapshot();
+      snap.containers = await containerStats();
+      // 面板的「来源」标记：自采时不显示外部依赖
+      snap.source = 'native';
+      stats = snap;
+    } catch (e) {
+      console.warn('[fnstart] 自采指标失败，回落到 fnMonitor：', e?.message || e);
+      stats = null;
+    }
+
+    if (!stats) {
+      stats = await getMonitorStats(proxyTarget());
+      if (stats) stats.source = 'fnmonitor';
+    }
+
     const cachePath = path.join(CONFIG.dataDir, 'last-monitor.json');
     if (stats) {
       fs.writeFile(cachePath, JSON.stringify(stats)).catch(() => {});
@@ -470,7 +493,7 @@ async function handleApi(req, res, url) {
         /* 没有快照就算了 */
       }
     }
-    return json(res, 200, { ok: !!stats, stale, stats });
+    return json(res, 200, { ok: !!stats, stale, source: stats?.source || '', stats });
   }
 
   // 天气（取不到就回退上次成功的结果，最长 6 小时）
@@ -494,12 +517,17 @@ async function handleApi(req, res, url) {
     return json(res, 200, data);
   }
 
-  // 代理探活：检查监控地址本身是否可访问
+  // 探活：自采模式下看宿主机 procfs 能不能读到；否则检查 fnMonitor 地址
   if (p === '/api/monitor/ping' && method === 'GET') {
-    const s = await store.load();
+    try {
+      const snap = await systemSnapshot();
+      if (snap?.online) return json(res, 200, { ok: true, status: 200, source: 'native' });
+    } catch {
+      /* 自采不通，落到下面探外部地址 */
+    }
     const target = new URL(proxyTarget());
     const res2 = await rawGet(`${target.protocol}//${target.host}/`, { timeout: 3000, maxBytes: 4096 });
-    return json(res, 200, { ok: !!res2 && res2.status < 500, status: res2?.status || 0 });
+    return json(res, 200, { ok: !!res2 && res2.status < 500, status: res2?.status || 0, source: 'fnmonitor' });
   }
 
   if (p === '/api/export' && method === 'GET') {
@@ -621,6 +649,8 @@ server.on('upgrade', async (req, socket, head) => {
 });
 
 await store.load();
+// 预热：CPU / 网络 / 功耗都是差分型指标，先采一次底，第一次打开面板就有值
+warmup().catch(() => {});
 server.listen(CONFIG.port, '0.0.0.0', () => {
   console.log(`[fnstart] 已启动 → http://0.0.0.0:${CONFIG.port}`);
   console.log(`[fnstart] 数据目录 ${CONFIG.dataDir}`);

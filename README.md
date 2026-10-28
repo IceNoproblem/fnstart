@@ -17,7 +17,7 @@ fnStart 就干一件事：**把这些散落的入口收成一页。**
 
 - 自动扫出 NAS 上所有带 Web 界面的服务，**包括用 host 网络、根本没做端口映射的容器**（这才是重点，NAS 上大部分容器都是 host 网络）
 - 每张卡自动配好图标、名字，扫完就能点
-- 右边嵌一块飞牛监控，深色、点阵数字、细计量条，不弹窗不套白框，直接长在背景上
+- 右边嵌一块实时监控：CPU、内存、温度、功耗、风扇、盘温、网络、每个容器的占用，数据自己采，不依赖任何外部应用
 - 顶部一条：天气、搜索（百度/必应/谷歌…）、时间日期
 - 全屏一个按钮，标题栏地址栏全让出来
 
@@ -47,13 +47,17 @@ sudo bash scripts/install.sh
 
 想设成首页：Chrome / Edge → 设置 → 启动时 → 打开特定网页。
 
-### 3 · 想要右边那块监控面板，再跑一条
+### 3 · 监控面板不用装东西了
+
+从 1.4 起，右边那块面板的数据是**自己采的**：读宿主机的 `/proc` 和 `/sys`，CPU、内存、温度、功耗、风扇、盘温、网络、每个容器的占用都是直读，不需要任何外部应用。
+
+采不到的只有几样：硬盘 SMART 详细属性（重映射扇区、通电小时）、RAID 阵列卡状态、IPMI/BMC、GPU 利用率。想要这些，可以另外装 **飞牛监控 fnMonitor**（[MisiteQ](https://github.com/MisiteQ) 写的第三方开源应用，MIT，[仓库](https://github.com/MisiteQ/fnmonitor)），装上后面板会自动改用它的数据；不装也**不影响任何核心指标**。
 
 ```bash
 sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 ```
 
-面板数据来自 **飞牛监控 fnMonitor**，是 [MisiteQ](https://github.com/MisiteQ) 写的第三方开源应用（MIT，[仓库](https://github.com/MisiteQ/fnmonitor)）。**不是飞牛自带的**，也不在应用中心默认源里。不装也能用，只是右边空着。
+<sub>看不到 `/vol2`、`/vol3`？容器只挂了 `/vol1`，在 compose 里按注释格式各加一行挂载就行。</sub>
 
 ### 装不上
 
@@ -62,7 +66,8 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 | 页面打不开 | `docker logs fnstart --tail 20`，看最后一行 |
 | 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，改用下面「其它装法 → docker run」 |
 | 忘了令牌 | `grep ACCESS_TOKEN /vol1/docker/fnstart/.env` |
-| 右边读不到监控 | `curl http://你的NAS地址:8777/api/overview`；不通就是第 3 步没做 |
+| 右边读不到监控 | 看容器有没有挂到宿主 sysfs：`docker exec fnstart ls /host/sys/class/hwmon`，有输出就有数据 |
+| 监控里没有温度/风扇/功耗 | 同上，说明 `/sys` 没挂。CPU、内存、网络、磁盘不受影响 |
 | 卡片没有容器名 | `docker logs fnstart-docker-proxy`，看它起来没有 |
 | 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
@@ -127,7 +132,7 @@ PORT=3721 DATA_DIR=./data node server.js
 
 **搜索顺手找卡** — 搜索框打字，卡片名字/描述对得上就直接亮起来，下面告诉你命中几张。回车才是真去搜。
 
-**设置** — 右上角：标题、副标题、背景（极光 / 纯色 / 图片）、每行列数、天气城市、时区，还有**每张卡单独的开关**（不想让家里人看到某些入口时有用）。
+**设置** — 右上角：标题、副标题、**界面字号（四档）**、背景（极光 / 纯色 / 图片）、每行列数、天气城市、时区，还有**每张卡单独的开关**（不想让家里人看到某些入口时有用）。
 
 **手机端是重排过的**，不是等比缩小：搜索独占一行，天气时间落第二行；卡片单列更紧凑；没有悬停所以编辑/删除直接常显；不能拖拽（手指一滑就得滚页面，两者必然打架），改成**长按弹面板**上移/下移/编辑/删除；输入框字号锁 16px，免得 iOS 一点就放大整页。
 
@@ -269,7 +274,11 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 
 ## 常见问题
 
-**为什么不把 fnMonitor 一起写进 compose，一条命令全起来？**
+**fnMonitor 现在还要不要装？**
+
+不要也能用。1.4 起面板数据是自己采的（读 `/proc` 和 `/sys`），核心指标一个不缺。它只补三样我确实采不到的：硬盘 SMART 详细属性、RAID 阵列卡、IPMI/BMC。
+
+顺带回答当初那个问题——为什么从来没把它写进 compose：它不是容器型应用，是个宿主机监控代理，工作就是摸硬件（`smartctl`、`sensors`、`ipmitool`、`/dev/port`…）。要塞进容器就得 `privileged: true` 挂一堆 `/sys` `/dev`，等于把整台 NAS 交给一个容器，比装 FPK 危险得多。现在两边各走各的，谁升级都不影响谁。
 
 问得好，我先试过，放弃了。它不是容器型应用——它是个宿主机监控代理，工作就是摸硬件：`smartctl` 读硬盘 SMART、`sensors` 读温度、`ipmitool` 读 BMC，还要读 `/sys/class/hwmon`、`/proc/*`、`/dev/sd*`，甚至 `/dev/port`（直接读 I/O 端口，兼容 NEC/联想商用机那种走私有 EC 邮箱的风扇）。
 
@@ -300,7 +309,7 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 
 ## 用了谁的东西
 
-**飞牛监控 fnMonitor** — 右边那块面板，数据和审美都来自它。作者 **Misite齊**（[@MisiteQ](https://github.com/MisiteQ)），MIT 许可，仓库 <https://github.com/MisiteQ/fnmonitor>。纯 Python 标准库 + 单文件前端，零依赖，数据只留在本机 SQLite，确实下了功夫，推荐去点个 star。
+**飞牛监控 fnMonitor** — 右边那块面板的**视觉语言**参考了它（深色底、点阵数字、细计量条）。1.4 起数据改为自己采，它变成可选增强。作者 **Misite齊**（[@MisiteQ](https://github.com/MisiteQ)），MIT 许可，仓库 <https://github.com/MisiteQ/fnmonitor>。纯 Python 标准库 + 单文件前端，零依赖，数据只留在本机 SQLite，确实下了功夫，推荐去点个 star。
 
 需要说明的是：**本仓库不包含 fnMonitor 的任何代码或样式表**，我们只是消费者，通过 HTTP 读它的 `/api/overview`。早期原型为了对照效果引用过它的 CSS，开源前已整份删除，重写成 `public/css/fn-theme.css`（约 4KB，全是我自己写的规则），点阵字模也是自己写的 5×7 位图表。本项目与 fnMonitor 作者、与飞牛官方**都没有隶属或背书关系**。
 

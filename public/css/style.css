@@ -270,7 +270,8 @@ body.has-monitor .stage::after{display:block}
   .board-sep .sep-add{display:inline-flex}
 }
 
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(219px,1fr));gap:12px}
+/* 卡片最小宽度跟着字号走：字号放大时卡片也变宽，否则名字会被截成一片省略号 */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(219px * var(--ui-scale,1)),1fr));gap:12px}
 .grid[data-cols="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
 .grid[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr))}
 .grid[data-cols="4"]{grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -956,3 +957,25 @@ select.sel option{background:#151b2c;color:var(--ink)}
 body.scrolling .fab,
 body.scrolling .fn-pill{opacity:0;transform:scale(.92);pointer-events:none}
 .fab,.fn-pill{transition:.22s var(--ease)}
+
+/* ============ 界面字号（设置 → 外观 → 界面字号） ============ */
+/*
+ * 只缩放「文字」，不动盒子尺寸与间距：放大字号时卡片高度、图标、圆角保持原样，
+ * 排版不会塌。倍数由 JS 写到 <html> 的 --ui-scale 上，默认 1 = 恢复原观感。
+ * 这里是对上方各规则的集中覆盖，改原值时要同步改这里。
+ */
+:root{--ui-scale:1}
+body{font-size:calc(14px * var(--ui-scale))}
+.site-title{font-size:calc(19px * var(--ui-scale))}
+.brand-sub{font-size:calc(12.5px * var(--ui-scale))}
+.searchbar input{font-size:calc(15.5px * var(--ui-scale))}
+.chip{font-size:calc(13px * var(--ui-scale))}
+.card-name{font-size:calc(14.5px * var(--ui-scale))}
+.card-desc{font-size:calc(11px * var(--ui-scale))}
+.tool-btn{font-size:calc(12.5px * var(--ui-scale))}
+.modal-head h2{font-size:calc(16px * var(--ui-scale))}
+.field label{font-size:calc(12px * var(--ui-scale))}
+.field input,.field select,.field textarea{font-size:calc(13.5px * var(--ui-scale))}
+.btn{font-size:calc(13px * var(--ui-scale))}
+.tip,.empty{font-size:calc(12.5px * var(--ui-scale))}
+.ct-row{font-size:calc(12.5px * var(--ui-scale))}

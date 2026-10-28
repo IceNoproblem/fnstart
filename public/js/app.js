@@ -1236,6 +1236,7 @@ function openSettings() {
   $('#sMonEnabled').checked = !!s.monitor.enabled;
   $('#sMonCollapsed').checked = !!s.monitor.collapsed;
   $('#sMonUrl').value = s.monitor.url || '';
+  $('#sPowerTdp').value = s.power?.tdpW ?? 0;
   $('#sPowerBase').value = s.power?.baseW ?? 8;
   $('#sPowerDisk').value = s.power?.diskW ?? 8;
   $('#statsLine').textContent = `共 ${state.cards.length} 张卡片，其中 ${state.cards.filter((c) => c.source === 'docker' || c.source === 'system').length} 张来自扫描`;
@@ -1844,7 +1845,9 @@ function updatePanel(st) {
   setSub(
     'pwr',
     parts
-      ? `CPU ${parts.cpu}W · 内存 ${parts.dram}W · ${parts.diskCount} 块盘 ${parts.disks}W`
+      ? parts.mode === 'estimate'
+        ? `CPU ${parts.cpu}W（${parts.cpuPercent}%×${parts.tdp}W）· ${parts.diskCount} 块盘 ${parts.disks}W`
+        : `CPU ${parts.cpu}W · 内存 ${parts.dram}W · ${parts.diskCount} 块盘 ${parts.disks}W`
       : st.power?.source
         ? `来源 ${st.power.source}`
         : '—',
@@ -2318,6 +2321,7 @@ function renderCardToggles() {
 
 /* 功耗估算的硬件参数：改完下一轮刷新就按新值算 */
 for (const [id, key, max] of [
+  ['#sPowerTdp', 'tdpW', 400],
   ['#sPowerBase', 'baseW', 200],
   ['#sPowerDisk', 'diskW', 60],
 ]) {

@@ -465,6 +465,7 @@ async function handleApi(req, res, url) {
      */
     try {
       const snap = await systemSnapshot({
+        powerTdpW: s.settings.power?.tdpW,
         powerBaseW: s.settings.power?.baseW,
         powerDiskW: s.settings.power?.diskW,
       });

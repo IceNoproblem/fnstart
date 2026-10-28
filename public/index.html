@@ -276,6 +276,11 @@
         </div>
       </div>
       <p class="tip">融合面板的数据是自己采的（读宿主 <code>/proc</code> 和 <code>/sys</code>），不需要装飞牛监控；嵌入原页才需要那个地址。</p>
+      <div class="field">
+        <label>CPU 最大功耗（TDP）<small>填了它，CPU 功耗按「TDP × 占用率」估算；留 0 用 RAPL 实测值</small>
+          <input id="sPowerTdp" type="number" min="0" max="400" step="1" value="0" style="width:70px"> W
+        </label>
+      </div>
       <div class="field row">
         <label>主板基础功耗 <small>主板+网卡+风扇</small>
           <input id="sPowerBase" type="number" min="0" max="200" step="1" value="8" style="width:70px"> W
@@ -284,7 +289,7 @@
           <input id="sPowerDisk" type="number" min="0" max="60" step="1" value="8" style="width:70px"> W
         </label>
       </div>
-      <p class="tip">功耗 = RAPL 实测（CPU + 内存）+ 上面两项折算。RAPL 测不到主板和硬盘，所以这终究是估算，不是电表读数。</p>
+      <p class="tip">整机功耗 = CPU + 主板基础 + 硬盘数×单盘。CPU 部分填了 TDP 就按占用率折算，不填就用 RAPL 实测（更准）。RAPL 测不到主板和硬盘，所以这终究是估算，不是电表读数。</p>
     </div>
 
     <div class="tab-panel" data-panel="cards" hidden>

@@ -311,7 +311,8 @@ async function dataTests() {
   });
 
   await test('服务扫描（只读）', async () => {
-    const r = await req('/api/discover?apply=0&force=0');
+    // 写接口只接受 POST：GET 会让浏览器预取、爬虫顺手触发一次写库
+    const r = await req('/api/discover?apply=0&force=0', { method: 'POST' });
     need(r.status === 200, `状态码 ${r.status}`);
     const d = r.data;
     need(d.ok, '扫描失败');
@@ -358,7 +359,8 @@ async function authTests() {
     need(first.status === 200, `首次带 cookie 访问返回 ${first.status}`);
     const sc = first.headers.get('set-cookie') || '';
     need(/fnstart_auth=/.test(sc), '打开页面没有重发 cookie，滑动续期没生效');
-    need(/Max-Age=2592000/.test(sc), `Max-Age 不对：${sc}`);
+    // 有效期从 30 天收到 7 天：令牌是唯一凭证，窗口太长
+    need(/Max-Age=604800/.test(sc), `Max-Age 不对：${sc}`);
 
     // 再来一次，确认是「每次打开页面都续」而不是只发一次
     await first.text();

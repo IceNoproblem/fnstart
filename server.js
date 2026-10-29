@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { CONFIG, ICON_DIR, BG_DIR } from './lib/config.js';
@@ -126,10 +127,110 @@ const AUTH_COOKIE = 'fnstart_auth';
 /** HTTPS 进来就给 cookie 加 Secure，免得它被明文请求带出去；内网 HTTP 直连不加，否则每次都要重登 */
 const authCookie = (req) =>
   `${AUTH_COOKIE}=${AUTH_HASH}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${AUTH_MAX_AGE}${isHttps(req) ? '; Secure' : ''}`;
-const AUTH_MAX_AGE = 30 * 24 * 3600;
+const AUTH_MAX_AGE = 7 * 24 * 3600; // 令牌是唯一凭证，窗口不宜太长
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 const AUTH_HASH = CONFIG.accessToken ? sha256(CONFIG.accessToken) : '';
-let authFail = 0; // 登录失败次数，用于递增延时
+
+/* ---------------- 登录限速：按来源 IP ---------------- */
+
+/**
+ * 连续失败到这个次数，就把这个 IP 关一段时间的小黑屋。
+ *
+ * 为什么必须按 IP：原来是一个模块级计数器，所有请求共用一个数。
+ * 任何人从任意一台机器连错几次，接下来所有人登录都要被拖慢到 5 秒 ——
+ * 既能把真正的主人锁在门外（自伤），又拦不住换 IP 继续试（无效）。
+ * 而令牌就是这个面板唯一的防线。
+ */
+const AUTH_FAIL_MAX = 8;
+/** 计数窗口与封禁时长 */
+const AUTH_LOCK_MS = 5 * 60_000;
+
+const authFails = new Map(); // ip -> { count, until, last }
+
+/** ::ffff:1.2.3.4 这种映射写法统一成 IPv4，方便比较 */
+const normIp = (ip) => String(ip || '').replace(/^::ffff:/i, '');
+
+/** 本机所有地址：同机部署的反代会用其中任意一个连过来 */
+const LOCAL_ADDRS = new Set(['127.0.0.1', '::1', 'unknown']);
+for (const list of Object.values(os.networkInterfaces())) {
+  for (const n of list || []) if (n?.address) LOCAL_ADDRS.add(normIp(n.address));
+}
+
+const ipv4ToInt = (ip) => {
+  const p = String(ip).split('.').map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
+};
+
+const inCidr = (ip, cidr) => {
+  if (!String(cidr).includes('/')) return ip === cidr;
+  const [base, bitsStr] = String(cidr).split('/');
+  const bits = Number(bitsStr);
+  const a = ipv4ToInt(ip);
+  const b = ipv4ToInt(base);
+  if (a === null || b === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  if (bits === 0) return true;
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
+  return (a & mask) === (b & mask);
+};
+
+/** 直连方是不是排在前面、可以采信其转发头的那个反代 */
+const isTrustedProxy = (ip) => {
+  if (LOCAL_ADDRS.has(ip)) return true;
+  return CONFIG.trustProxyCidrs.some((c) => inCidr(ip, c));
+};
+
+/**
+ * 这次请求真正来自谁。
+ *
+ * 默认只认 socket 的对端地址 —— X-Forwarded-For 谁都能写，默认信任等于把限速作废。
+ * 开了 TRUST_PROXY 且直连方确实是可信反代时，才看转发头：
+ *   - X-Real-IP 优先（单值，最干净）
+ *   - 否则取 XFF 的**最后一个**：那才是紧邻我们的反代看到的地址。
+ *     前面的值可能是客户端自己塞进来的，取第一个就等于让攻击者随便指定 IP。
+ */
+const clientIp = (req) => {
+  const direct = normIp(req.socket?.remoteAddress || 'unknown');
+  if (!CONFIG.trustProxy || !isTrustedProxy(direct)) return direct;
+  const real = String(req.headers['x-real-ip'] || '').trim();
+  if (net.isIP(real)) return normIp(real);
+  const xff = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const last = xff[xff.length - 1];
+  return last && net.isIP(last) ? normIp(last) : direct;
+};
+
+const lockLeftMs = (ip) => {
+  const r = authFails.get(ip);
+  if (!r || !r.until) return 0;
+  const left = r.until - Date.now();
+  if (left <= 0) {
+    authFails.delete(ip);
+    return 0;
+  }
+  return left;
+};
+
+const noteAuthFail = (ip) => {
+  const now = Date.now();
+  let r = authFails.get(ip);
+  if (!r || now - r.last > AUTH_LOCK_MS) r = { count: 0, until: 0, last: now };
+  r.count += 1;
+  r.last = now;
+  if (r.count >= AUTH_FAIL_MAX) r.until = now + AUTH_LOCK_MS;
+  authFails.set(ip, r);
+  return r;
+};
+
+// 定期清掉过期记录，免得被海量来源 IP 把 Map 撑大
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, r] of authFails) {
+    if (r.until ? r.until < now : now - r.last > AUTH_LOCK_MS * 2) authFails.delete(ip);
+  }
+}, 60_000).unref();
 
 /** 交给代理的「我方凭证」描述：只摘自己那一条，别动上游自己的登录态 */
 const PROXY_AUTH = AUTH_HASH
@@ -217,7 +318,7 @@ const loginPage = (msg = '') => `<!doctype html>
   <input name="token" type="password" placeholder="访问令牌" autocomplete="current-password" autofocus>
   <button type="submit">进入</button>
   ${msg ? `<div class="err">${msg}</div>` : ''}
-  <div class="tip">登录一次记 30 天；只要期间打开过主页，有效期会自动往后顺延。忘了令牌见 README「忘了令牌怎么办」。</div>
+  <div class="tip">登录一次记 7 天；只要期间打开过主页，有效期会自动往后顺延。忘了令牌见 README「忘了令牌怎么办」。</div>
 </form></body></html>`;
 
 async function serveFile(res, filePath, { cache = 'no-cache', download = false } = {}) {
@@ -410,7 +511,11 @@ async function handleApi(req, res, url) {
   }
 
   // 扫描容器
-  if (p === '/api/discover' && (method === 'POST' || method === 'GET')) {
+  /*
+   * 只接受 POST：这个接口会把扫到的卡片写进库。
+   * 允许 GET 的话，浏览器预取、爬虫、<img src> 都可能顺手触发一次写操作。
+   */
+  if (p === '/api/discover' && method === 'POST') {
     const force = url.searchParams.get('force') !== '0';
     const apply = url.searchParams.get('apply') !== '0';
     const host = hostOf(req);
@@ -566,25 +671,83 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const p = url.pathname;
 
+  /*
+   * 安全头统一在这里挂，不靠每个分支自己记得加。
+   * 用 setHeader 而不是塞进各处的 writeHead：writeHead 会覆盖同名头，
+   * 但没提到的会保留，所以各响应函数照旧只写自己关心的那几项。
+   */
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader(
+    'Permissions-Policy',
+    'geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=()',
+  );
+  /*
+   * HSTS 只在确认走的是 HTTPS 时才发。
+   * 内网直连走的是明文 HTTP，如果这里无脑下发，浏览器会把这个域名
+   * 强制升级到 https，而内网那个端口根本没有 TLS —— 页面直接打不开。
+   */
+  if (isHttps(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+  // /fn/ 是代理的第三方监控页面，别把它的跨窗口行为改掉
+  if (!p.startsWith('/fn/')) {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  }
+
   try {
     // 登录提交，这一条不需要令牌（否则没法登录）
     if (p === '/__login' && req.method === 'POST') {
+      const ip = clientIp(req);
+      const left = lockLeftMs(ip);
+
       const raw = await readBody(req, 8192);
       const form = new URLSearchParams(raw.toString('utf8'));
       const input = form.get('token') || '';
+
+      /*
+       * 先验证令牌，再判锁定。
+       * 锁是为了挡住「猜」—— 猜对了就说明已经拿到凭证，没有拦的理由；
+       * 而且真要拦的话，被误锁的本人得干等 5 分钟才能进，纯粹添堵。
+       * 反过来，锁定期间猜错一律 429、不再回 401、也不再加延迟，攻击方得不到额外信息。
+       */
       if (AUTH_HASH && hashEq(sha256(input), AUTH_HASH)) {
+        authFails.delete(ip); // 答对了，之前的失败记录一笔勾销
         res.writeHead(303, {
           'Set-Cookie': authCookie(req),
           Location: '/',
           'Cache-Control': 'no-store',
         });
-        authFail = 0;
         return res.end();
       }
-      // 连续输错就逐步变慢（400ms → 5s），别让人拿这个接口当爆破入口。
-      // 正常人只会错一两次，感知不到；脚本爆破则被拖到没有意义。
-      authFail += 1;
-      const wait = Math.min(400 * 2 ** Math.min(authFail - 1, 4), 5000);
+
+      // 已经被关小黑屋：直接回 429，别让这个连接陪着等
+      if (left > 0) {
+        const secs = Math.ceil(left / 1000);
+        res.writeHead(429, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Retry-After': String(secs),
+        });
+        return res.end(loginPage(`尝试次数过多，请 ${Math.ceil(secs / 60)} 分钟后再试`));
+      }
+
+      /*
+       * 记一次失败。只影响这一个 IP：
+       *   - 阈值以内给它逐渐变慢（300ms → 1.2s），真人只会错一两次，感知不到
+       *   - 到阈值就回 429 + Retry-After，明明白白告诉它等待多久
+       * 上限压到 1.2 秒而不是 5 秒 —— 拖太久会白占着连接，而且真正挡住爆破的是 429。
+       */
+      const rec = noteAuthFail(ip);
+      if (rec.until) {
+        res.writeHead(429, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Retry-After': String(Math.ceil(AUTH_LOCK_MS / 1000)),
+        });
+        return res.end(loginPage(`尝试次数过多，请 ${Math.ceil(AUTH_LOCK_MS / 60000)} 分钟后再试`));
+      }
+      const wait = Math.min(300 * 2 ** Math.min(rec.count - 1, 3), 1200);
       await new Promise((r) => setTimeout(r, wait));
       return html(res, 401, loginPage('令牌不对，再试一次'));
     }
@@ -604,8 +767,8 @@ const server = http.createServer(async (req, res) => {
         if (p.startsWith('/api/')) return json(res, 401, { ok: false, error: '需要访问令牌' });
         return html(res, 401, loginPage());
       }
-      // 滑动续期：只在「打开页面」时重发一次 cookie，把 30 天重新算起。
-      // 不这么做的话 Max-Age 是硬过期 —— 第 31 天不管你昨天刚用过，照样被踢回登录页。
+      // 滑动续期：只在「打开页面」时重发一次 cookie，把有效期重新算起。
+      // 不这么做的话 Max-Age 是硬过期 —— 到期那天不管你昨天刚用过，照样被踢回登录页。
       // 静态资源和 /api/ 不续，免得每个图标响应都多背一个 Set-Cookie。
       if (how === 'cookie' && (p === '/' || p === '/index.html')) {
         res.setHeader('Set-Cookie', authCookie(req));
@@ -677,8 +840,8 @@ await store.load();
 warmup().catch(() => {});
 // 容器资源占用放后台常驻采，别堵在请求路径里（单个 stats 要 1 秒，25 个等不起）
 startContainerWatcher();
-server.listen(CONFIG.port, '0.0.0.0', () => {
-  console.log(`[fnstart] 已启动 → http://0.0.0.0:${CONFIG.port}`);
+server.listen(CONFIG.port, CONFIG.host, () => {
+  console.log(`[fnstart] 已启动 → http://${CONFIG.host}:${CONFIG.port}`);
   console.log(`[fnstart] 数据目录 ${CONFIG.dataDir}`);
   console.log(`[fnstart] Docker socket ${CONFIG.dockerSock}`);
   /*

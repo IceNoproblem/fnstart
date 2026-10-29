@@ -61,10 +61,31 @@ services:
       ACCESS_TOKEN: ${ACCESS_TOKEN:-}
       # 设了令牌后会自动禁止服务端抓内网图标（防 SSRF）；纯内网想强行关掉就设 0
       # BLOCK_PRIVATE_FETCH: 0
+      #
+      # 前面挂了反代（这里是雷池）就打开它，登录限速才会按「真实客户端 IP」算，
+      # 而不是把所有人算成同一个 127.0.0.1。
+      # 安全性依赖一条：只有直连方是本机地址 / TRUST_PROXY_CIDRS 里的地址时才采信转发头。
+      # 别人从局域网直连过来伪造 X-Forwarded-For 没用，照样按他的 socket 地址计。
+      TRUST_PROXY: "1"
+      # 反代不在本机时才需要填，逗号分隔 CIDR，例如 172.18.0.0/16
+      # TRUST_PROXY_CIDRS: "" 
     # 需要 CAP_SYS_PTRACE 才能读宿主机 /proc/<pid>/fd，把 host 网络容器的端口
     # 反查回容器名。不加也能跑，只是这类容器认不出来，卡片退回用网页标题命名。
+    #
+    # 其余能力一律丢掉：这套东西只做「读文件 + 读 proc/sys + 听端口」，
+    # 不需要 NET_ADMIN / SYS_ADMIN / MKNOD / NET_RAW / SETUID 这些。
+    # 但 DAC_OVERRIDE 和 DAC_READ_SEARCH 必须留着 —— /data 目录在宿主机用户名下、
+    # 权限 755，容器里虽然是 root，缺了这两项就建不了同目录临时文件，
+    # 而 store 的写入正是「临时文件 + rename」的原子写，会直接失败。
+    cap_drop:
+      - ALL
     cap_add:
       - SYS_PTRACE
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+    # 进程不能再通过 setuid 之类的路子把权限拿回来
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/data
       # 注意：这里**不挂** docker socket。列容器走上面的 docker-proxy，

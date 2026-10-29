@@ -128,9 +128,11 @@ docker run -d --name fnstart-docker-proxy --network host --restart unless-stoppe
 
 ```bash
 docker run -d --name fnstart --network host --restart unless-stopped \
-  --cap-add=SYS_PTRACE \
+  --cap-drop=ALL \
+  --cap-add=SYS_PTRACE --cap-add=DAC_OVERRIDE --cap-add=DAC_READ_SEARCH \
+  --security-opt=no-new-privileges:true \
   -v /vol1/docker/fnstart:/app -v /vol1/docker/fnstart/data:/data \
-  -v /proc:/host/proc:ro \
+  -v /proc:/host/proc:ro -v /sys:/host/sys:ro \
   -w /app -e PORT=3721 -e DATA_DIR=/data \
   -e DOCKER_SOCK=http://127.0.0.1:2375 \
   -e ACCESS_TOKEN=你的令牌 \
@@ -180,9 +182,14 @@ PORT=3721 DATA_DIR=./data node server.js
 3. **认容器名**：bridge 容器直接读 Docker API 的端口映射；host 容器没有映射，就反查——端口 → socket inode → 持有它的进程 → 属于哪个容器。这一步要容器能看见宿主机进程表：
 
 ```yaml
-cap_add: [SYS_PTRACE]        # 读 /proc/<pid>/fd 需要
+cap_drop: [ALL]                        # 先全丢掉，再按需加回
+cap_add:
+  - SYS_PTRACE                         # 读 /proc/<pid>/fd 需要
+  - DAC_OVERRIDE                       # /data 在宿主机用户名下时，建临时文件需要
+  - DAC_READ_SEARCH                    # 同理，读宿主 proc 下的路径需要
+security_opt: [no-new-privileges:true]
 volumes:
-  - /proc:/host/proc:ro      # 看见宿主机的进程
+  - /proc:/host/proc:ro                # 看见宿主机的进程
 ```
 
 `SYS_PTRACE` 听着吓人，它只用来"读进程开了哪些 socket"，没有写操作、不 attach、不注入。**不给也能跑**，只是 host 容器认不出名字，卡片退回用网页标题命名。
@@ -250,7 +257,7 @@ docker compose up -d
 
 生成完立刻抄进密码管理器。我也没做「首次启动自动生成」——隐式生成的密码最容易丢，躺在日志或容器环境变量里，换台机器就找不回来。
 
-**二、它不会变。** 令牌是你自己设的死值，程序不会自动生成也不会自动换。**会过期的是登录 cookie（30 天），不是令牌。** cookie 还是滑动续期：每次打开主页就把 30 天重新算起，天天用就永远不会掉；真闲置超过 30 天才需要重登，而重登也只是把同一串再贴一次。
+**二、它不会变。** 令牌是你自己设的死值，程序不会自动生成也不会自动换。**会过期的是登录 cookie（7 天），不是令牌。** cookie 还是滑动续期：每次打开主页就把 7 天重新算起，天天用就永远不会掉；真闲置超过 7 天才需要重登，而重登也只是把同一串再贴一次。
 
 手机上懒得手打那一长串，用一次性链接 `http://你的地址:3721/?token=那串令牌`，打开后立刻换发 cookie 并跳回干净地址。但**链接本身带着令牌**，会留在浏览器历史、聊天记录、反代日志里，只在自己的设备之间传。
 
@@ -316,13 +323,62 @@ location / {
 ```
 </details>
 
+### 服务端替你去抓图标，这事得管住
+
+卡片可以填任意网址、让服务端去抓 favicon。端口一旦暴露，这个接口就成了「让别人用我的服务器探测我内网」的跳板——而且抓到的内容会存成文件，再通过 `/icons/` 读回来，等于能把内网服务的响应读出来。
+
+最早的做法是拿正则在主机名上找 `127.`、`192.168.` 这类前缀。**这个思路本身是错的**：`127-0-0-1.sslip.io` 解析出来就是 127.0.0.1，可字符串里连个 `127` 都看不出来，正则必然漏。
+
+现在判断落在**解析出来的 IP** 上，而且：
+
+- 校验放在 DNS 的 `lookup` 里 —— 判定用的 IP 和真正要连的 IP 是同一个，没有 DNS 重绑定的时间窗；
+- 每一次 302 跳转都重新判，不是只查第一跳；
+- **守卫模式下禁用连接池**。这条是实测踩出来的：Node 19+ 默认 keepAlive，池里留着一条连过的 socket 时，下一次请求直接复用、根本不走 DNS，守卫形同虚设。先裸跑连一次，再开守卫，照样返回 200。
+
+顺带把图标类型也收紧了：只接受真正的图片（content-type 或文件头魔数任一能认出），返回 HTML 的地址不再被存成「图标」。
+
+### 登录失败按 IP 算，不是全局
+
+原来是一个模块级计数器，全世界共用一个数。任何人连错几次，接下来所有人登录都要被拖慢到 5 秒——既能把你自己锁在门外，又拦不住换 IP 接着试。
+
+现在按来源 IP 记：阈值以内只让**这个 IP** 逐渐变慢（300ms → 1.2s），到 8 次就回 `429` + `Retry-After`，别的 IP 完全不受影响。锁定期内**输对了照样放行**——锁是防猜的，猜对了本来就没有拦的理由。
+
+转发头默认不认。`X-Forwarded-For` 谁都能写，默认信任等于把限速作废。只有确认前面挂了反代、并且直连方确实是本机/可信网段时，才看 `X-Real-IP` 或 XFF 的**最后一个**（那才是紧邻反代看到的地址；取第一个等于让攻击者自己指定 IP）：
+
+```yaml
+environment:
+  TRUST_PROXY: "1"          # 前面有反代才开
+  # TRUST_PROXY_CIDRS: "172.18.0.0/16"   # 反代不在本机时填
+```
+
+反代在同一台机器上时，还可以顺手把应用收窄到只听本机，局域网里别人就没法绕过反代的 WAF 和限速直连：
+
+```yaml
+environment:
+  HOST: "127.0.0.1"
+```
+
+（收窄之后记得把反代的上游也改成 `127.0.0.1:3721`，不然会连不上。）
+
 ### 说句实在话：能不暴露就别暴露
 
 Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，端口根本不出公网——上面所有问题一次性消失，还自带加密和身份认证。代价只是每台设备装个客户端。我现在就是这么用的。
 
-### 还剩一条我没解决的
+### 权限：能力砍到只剩三项
 
-容器以 root 运行。这条是架构性的：读宿主 `/proc/<pid>/fd`（把端口反查到进程）要权限，非 root 会让这个功能退化。只在「已经被拿下」之后才有意义，但我不想藏着，写在明处。
+容器仍然以 root 运行——这条是架构性的，读宿主 `/proc/<pid>/fd`（把端口反查到进程）要权限，非 root 会让「自动发现 host 网络容器」直接退化，而那是这个项目的核心功能。
+
+但拿到 root 不等于拿到一切。现在先 `cap_drop: ALL`，再只加回真正需要的三项：
+
+| 能力 | 为什么要 |
+|---|---|
+| `SYS_PTRACE` | 读 `/proc/<pid>/fd`，把端口反查回容器名 |
+| `DAC_OVERRIDE` | `/data` 挂在宿主机用户名下、755，缺它建不了临时文件，原子写会失败 |
+| `DAC_READ_SEARCH` | 同上，读宿主机 proc 下的路径 |
+
+`NET_ADMIN`、`SYS_ADMIN`、`MKNOD`、`NET_RAW`、`SETUID` 这些一律没有，另外加了 `no-new-privileges`，进程不能再靠 setuid 把权限拿回来。实测收敛后功能零退化：温度/功耗照读、容器列表 25/25、自动发现仍能认出 10 个容器名。
+
+要说还剩下的风险：host 网络 + 只读 proc/sys 这套组合，是为了「不装任何东西就能看见宿主机上的服务」。真被拿下的话，攻击者看得到宿主机全部进程——所以我更建议直接用 Tailscale，不要把它挂到公网。
 
 ## 常见问题
 

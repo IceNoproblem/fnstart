@@ -367,7 +367,7 @@ async function authTests() {
     const second = await get();
     need(/fnstart_auth=/.test(second.headers.get('set-cookie') || ''), '第二次打开页面没有续期');
     await second.text();
-    return '30 天顺延';
+    return '7 天顺延';
   });
 
   await test('?token= 一次性链接', async () => {

@@ -3433,8 +3433,16 @@ function skeleton(n = 9) {
 
 async function boot() {
   skeleton();
+  /*
+   * 首页 head 里那段内联脚本已经把 /api/state 提前发出去了，
+   * 这里复用同一个 promise —— 请求和「解析 HTML + 下载 app.js」并行跑，
+   * 不用等模块执行完才发第一个请求。
+   * 拿不到（401、断网、被扩展拦掉）就老老实实按老路子重发一次，行为和以前一致。
+   */
+  const prewarmed = window.__fnstate;
+  window.__fnstate = null;
   try {
-    const st = await api('/api/state');
+    const st = (prewarmed && (await prewarmed)) || (await api('/api/state'));
     state.settings = st.settings;
     state.cards = st.cards;
     state.meta = st.meta || {};

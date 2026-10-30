@@ -7,6 +7,24 @@
 <title>控制台</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1120'/%3E%3Cpath d='M20 26h24M20 34h16M20 42h20' stroke='%236ee7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/style.css">
+<!--
+  提前把 app.js 拉下来。它是页面里最大的一块，标签在 body 末尾 —— 等 HTML 解析到
+  那里才开始下载，等于白白排在 17KB 的 HTML 后面。这里让下载和 CSS 解析同时开始。
+  href 要和文末那个脚本标签完全一致（含服务端注入的 ?v=），否则会下两份。
+-->
+<link rel="modulepreload" href="/js/app.js">
+<script>
+  /*
+   * 首屏数据提前发起。
+   * app.js 是 module，要等 HTML 解析完才执行，那时才发 /api/state 就晚了一步。
+   * 这里先把 promise 挂着，请求和「解析 HTML + 下载 app.js」并行跑；
+   * app.js 的 boot() 直接 await 它，不会重复发第二次。
+   * 失败（401、断网）就交回给 boot() 里的常规流程去报错。
+   */
+  window.__fnstate = fetch('/api/state')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; });
+</script>
 </head>
 <body>
 <div class="bg-image" id="bgImage"></div>
@@ -360,7 +378,8 @@
 <div class="toast" id="toast" hidden></div>
 <div class="sheet-mask" id="sheetMask" hidden></div>
 
-<script src="/js/lunar.js"></script>
+<!-- lunar.js 只有打开日历弹窗时才用得上，别让它卡住解析；defer 仍排在 app.js 之前执行 -->
+<script src="/js/lunar.js" defer></script>
 <script src="/js/app.js" type="module"></script>
 </body>
 </html>

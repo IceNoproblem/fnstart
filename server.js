@@ -5,13 +5,14 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { URL } from 'node:url';
 import { CONFIG, ICON_DIR, BG_DIR } from './lib/config.js';
 import * as store from './lib/store.js';
 import { discoverWithIcons, fetchIcon, rawGet } from './lib/discover.js';
 import { parseAny } from './lib/bookmarks.js';
 import { handleProxy, handleUpgrade, getMonitorStats } from './lib/proxy.js';
-import { systemSnapshot, warmup } from './lib/metrics.js';
+import { systemSnapshot, startMetricsWatcher, warmup } from './lib/metrics.js';
 import { containerStats, startContainerWatcher } from './lib/containers.js';
 import { getWeather } from './lib/weather.js';
 import { mediaStats, resolveMediaRoot } from './lib/media.js';
@@ -321,31 +322,263 @@ const loginPage = (msg = '') => `<!doctype html>
   <div class="tip">登录一次记 7 天；只要期间打开过主页，有效期会自动往后顺延。忘了令牌见 README「忘了令牌怎么办」。</div>
 </form></body></html>`;
 
-async function serveFile(res, filePath, { cache = 'no-cache', download = false } = {}) {
-  try {
-    const st = await fs.stat(filePath);
-    if (!st.isFile()) return text(res, 404, 'Not found');
-    const ext = path.extname(filePath).toLowerCase();
-    const headers = {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Content-Length': st.size,
-      'Cache-Control': cache,
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-    };
-    if (download) headers['Content-Disposition'] = 'attachment';
-    // 上传的 SVG 是同源文档，直接打开会执行里面的事件脚本。
-    // 这里用 CSP 把所有脚本能力按住，矢量图标照常显示。
-    if (ext === '.html') headers['X-Frame-Options'] = 'SAMEORIGIN';
-    if (ext === '.svg') {
-      headers['Content-Security-Policy'] =
-        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+/* ---------- 静态资源：压缩 / ETag / 内容哈希 ---------- */
+
+/*
+ * 只有文本类值得压。png / jpg / woff2 本身就是压缩格式，
+ * 再过一遍 zlib 只烧 CPU，体积基本不动，运气不好还变大。
+ */
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt']);
+/** gzip 头部就 18 字节，比这还小的文件压完通常更大，直接原样发 */
+const MIN_COMPRESS_BYTES = 1024;
+/** 超过这个尺寸不进内存：背景图动辄十几 MB，全塞进来就是让进程慢慢吃满内存 */
+const MAX_BUFFER_BYTES = 256 * 1024;
+/**
+ * 两个缓存都设上限。这是个一跑就是几个月的常驻进程，
+ * 缓存只为了省一次读盘，绝不能变成「用得越久内存越大」。
+ * 首页真正需要的就 4 个文件，96 条够放下一整屏图标还有富余。
+ */
+const MAX_ASSET_ENTRIES = 96;
+const MAX_PACKED_ENTRIES = 32;
+/** 带内容哈希的地址才配得上这个，没带哈希的地址给一年等于把用户锁在旧版本上 */
+const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
+
+/*
+ * 读盘结果缓存。键里带 mtime + size：文件一改键自然就换掉，
+ * 不需要谁记得来清缓存，也不怕部署时漏了清。
+ * 有了它，静态资源每个请求只剩一次 stat，压缩也只在第一次发生。
+ */
+const assetCache = new Map();
+/** 压缩结果，键是「内容哈希 + 编码」。内容变了哈希就变，旧的自然淘汰 */
+const packedCache = new Map();
+
+const hashOf = (buf) => crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 16);
+
+async function loadAsset(filePath) {
+  const st = await fs.stat(filePath);
+  if (!st.isFile() || st.size > MAX_BUFFER_BYTES) return null;
+  const hit = assetCache.get(filePath);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit;
+  const buf = await fs.readFile(filePath);
+  const entry = { mtimeMs: st.mtimeMs, size: st.size, buf, hash: hashOf(buf) };
+  assetCache.set(filePath, entry);
+  if (assetCache.size > MAX_ASSET_ENTRIES) assetCache.delete(assetCache.keys().next().value);
+  return entry;
+}
+
+/**
+ * Accept-Encoding 协商。只认 br / gzip，但 q=0 得当回事 ——
+ * 那是客户端在说「这个我解不开」。不认识的编码一律不压：
+ * 少压一次没有任何损失，发个解不开的东西过去就是白屏。
+ */
+function negotiateEncoding(header) {
+  const h = String(header || '').toLowerCase();
+  if (!h) return null;
+  const q = new Map();
+  for (const part of h.split(',')) {
+    const [name, ...params] = part.trim().split(';');
+    const key = (name || '').trim();
+    if (!key) continue;
+    let weight = 1;
+    for (const p of params) {
+      const m = /^\s*q\s*=\s*([0-9.]+)\s*$/.exec(p);
+      if (m) weight = Number(m[1]);
     }
-    res.writeHead(200, headers);
-    fss.createReadStream(filePath).pipe(res);
-  } catch {
-    text(res, 404, 'Not found');
+    q.set(key, Number.isFinite(weight) ? weight : 1);
   }
+  const weigh = (name) => (q.has(name) ? q.get(name) : q.get('*') ?? 0);
+  for (const enc of ['br', 'gzip']) if (weigh(enc) > 0) return enc;
+  return null;
+}
+
+/**
+ * 真正压一次，结果挂在「哈希 + 编码」上复用。
+ *
+ * brotli 用 quality 9 而不是 11（实测 app.js：q11 35.1KB / 136ms，q9 37.2KB / 10ms）。
+ * 那 136ms 恰好落在「某个人的第一次访问」那条请求上，事件循环被占着，
+ * 人是能感觉到的；多花的 126ms 只换回 2KB 压缩率，这笔账不划算。
+ */
+function packBuffer(buf, hash, enc) {
+  const key = `${hash}:${enc}`;
+  const hit = packedCache.get(key);
+  if (hit) return hit;
+  const out =
+    enc === 'br'
+      ? zlib.brotliCompressSync(buf, {
+          params: {
+            [zlib.constants.BROTLI_PARAM_QUALITY]: 9,
+            [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length,
+          },
+        })
+      : zlib.gzipSync(buf, { level: 9 });
+  packedCache.set(key, out);
+  if (packedCache.size > MAX_PACKED_ENTRIES) packedCache.delete(packedCache.keys().next().value);
+  return out;
+}
+
+/** If-None-Match 比对。浏览器回传的就是我们上次发的那个字符串，直接比即可 */
+function notModified(req, etag) {
+  const inm = req.headers['if-none-match'];
+  if (!inm) return false;
+  return inm
+    .split(',')
+    .some((t) => {
+      const v = t.trim();
+      return v === etag || v === '*' || v.replace(/^W\//, '') === etag;
+    });
+}
+
+/**
+ * 发一段文本资源：协商压缩、带 ETag、命中条件请求就回 304。
+ *
+ * 304 的收益全在重复访问上 —— 打开主页是个高频动作，每次省掉整个响应体，
+ * 只留一个来回。ETag 后面挂编码后缀，是因为 gzip 版和原版是两个不同的表示，
+ * 共用同一个标签会让中间缓存把压缩版发给解不开的客户端。
+ *
+ * allow304=false 只给 no-store 的响应用：no-store 的语义是「别存」，
+ * 再回一个「你手上那份还能用」的 304 就自相矛盾了。
+ */
+function sendText(req, res, buf, hash, { type, cache, headers = {}, allow304 = true }) {
+  let enc = buf.length >= MIN_COMPRESS_BYTES ? negotiateEncoding(req.headers['accept-encoding']) : null;
+  let body = buf;
+  if (enc) {
+    const packed = packBuffer(buf, hash, enc);
+    // 压完反而更大就别发（小文件常见），ETag 也跟着回到不带后缀的那一种
+    if (packed.length < buf.length) body = packed;
+    else enc = null;
+  }
+  const etag = `"${hash}${enc ? `-${enc}` : ''}"`;
+  const out = {
+    ...headers,
+    'Content-Type': type,
+    'Cache-Control': cache,
+    // 少了 Vary，中间的缓存/反代可能把压缩版发给不支持压缩的客户端
+    Vary: 'Accept-Encoding',
+    ETag: etag,
+  };
+  if (enc) out['Content-Encoding'] = enc;
+  if (allow304 && notModified(req, etag)) {
+    /*
+     * 304 只保留「描述缓存策略」的头，把「描述这次没发的响应体」的头去掉：
+     * Content-Type / Content-Length 删掉，Content-Encoding 也一起 ——
+     * 一个没有 body 的响应标着 br，某些代理会据此去改写缓存里的那份。
+     */
+    delete out['Content-Type'];
+    delete out['Content-Encoding'];
+    res.writeHead(304, out);
+    return res.end();
+  }
+  out['Content-Length'] = body.length;
+  res.writeHead(200, out);
+  res.end(body);
+}
+
+const INDEX_FILE = path.join(CONFIG.publicDir, 'index.html');
+/** 首页里所有本地 CSS/JS 引用，用来挂内容哈希 */
+const ASSET_REF = /(\b(?:href|src)=")(\/(?:css|js)\/[^"?#]+)(")/g;
+
+/**
+ * 把 index.html 里的 /css /js 引用改写成带内容哈希的地址（?v=xxx）。
+ *
+ * 这是「长缓存」和「改了要生效」这对矛盾的正解：文件一变哈希就变、URL 跟着变，
+ * 浏览器不去取新的都不行。反过来，只凭 app.js 这个固定文件名给一年缓存，
+ * 用户会一直看到旧版本，而且除了手动清缓存没有任何办法。
+ *
+ * 渲染结果按依赖哈希缓存，只有依赖真的变了才重新拼一遍。
+ */
+async function versionedIndex(entry) {
+  if (!entry.refs) entry.refs = [...new Set([...entry.buf.toString('utf8').matchAll(ASSET_REF)].map((m) => m[2]))];
+  const metas = await Promise.all(
+    entry.refs.map((u) => {
+      const abs = safeJoin(CONFIG.publicDir, u);
+      return abs ? loadAsset(abs).catch(() => null) : null;
+    }),
+  );
+  const ver = new Map(entry.refs.map((u, i) => [u, metas[i]?.hash || '']));
+  const key = entry.refs.map((u) => `${u}@${ver.get(u)}`).join('|');
+  if (entry.verKey === key) return { buf: entry.verBuf, hash: entry.verHash };
+  const buf = Buffer.from(
+    entry.buf
+      .toString('utf8')
+      .replace(ASSET_REF, (all, pre, url, post) => (ver.get(url) ? `${pre}${url}?v=${ver.get(url)}${post}` : all)),
+    'utf8',
+  );
+  entry.verKey = key;
+  entry.verBuf = buf;
+  entry.verHash = hashOf(buf);
+  return { buf, hash: entry.verHash };
+}
+
+async function serveIndex(req, res) {
+  const entry = await loadAsset(INDEX_FILE).catch(() => null);
+  if (!entry) return serveFile(req, res, INDEX_FILE, { cache: 'no-store' });
+  const { buf, hash } = await versionedIndex(entry);
+  /*
+   * 首页的 Cache-Control 保持 no-store，也不回 304。
+   *
+   * 改成 no-cache + ETag 能省掉重复访问的整个 HTML 响应体，但也就 18KB、
+   * 局域网上 0.2ms 的事；而这页上有内网服务地址，是一份私人页面，
+   * no-store 是「连磁盘都别写」的那一档，attack-test 里也把它当安全项在守。
+   * 为了 0.2ms 把这条防线降级，不划算。压缩带来的 18KB→5KB 才是这里的大头。
+   *
+   * allow304:false 是配套的：no-store 说自己「别存」，却又回一个
+   * 「你手上那份还能用」的 304，语义自相矛盾。万一某个代理/扩展硬存了一份，
+   * 就会一直拿到旧页面。这里就永远 200 全量 —— 剩下的 5KB 是压缩后的，
+   * 比让人看旧页面便宜得多。ETag 留着无害，只是不响应条件请求。
+   */
+  return sendText(req, res, buf, hash, {
+    type: MIME['.html'],
+    cache: 'no-store',
+    headers: { 'X-Frame-Options': 'SAMEORIGIN' },
+    allow304: false,
+  });
+}
+
+/**
+ * @param version 请求地址上的 ?v=xxx。只有和当前内容哈希一致才给一年强缓存：
+ *   对不上（没带，或者部署后被改过）就退回 no-cache，宁可多一次条件请求，
+ *   也不能让浏览器把旧版本锁一年。
+ */
+async function serveFile(req, res, filePath, { cache = 'no-cache', download = false, version = '' } = {}) {
+  let st;
+  try {
+    st = await fs.stat(filePath);
+  } catch {
+    return text(res, 404, 'Not found');
+  }
+  if (!st.isFile()) return text(res, 404, 'Not found');
+
+  const ext = path.extname(filePath).toLowerCase();
+  const type = MIME[ext] || 'application/octet-stream';
+  const headers = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+  if (download) headers['Content-Disposition'] = 'attachment';
+  // 上传的 SVG 是同源文档，直接打开会执行里面的事件脚本。
+  // 这里用 CSP 把所有脚本能力按住，矢量图标照常显示。
+  if (ext === '.html') headers['X-Frame-Options'] = 'SAMEORIGIN';
+  if (ext === '.svg') {
+    headers['Content-Security-Policy'] =
+      "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+  }
+
+  if (COMPRESSIBLE.has(ext)) {
+    const entry = await loadAsset(filePath).catch(() => null);
+    if (entry) {
+      return sendText(req, res, entry.buf, entry.hash, {
+        type,
+        cache: version && version === entry.hash ? IMMUTABLE_CACHE : cache,
+        headers,
+      });
+    }
+    // 读不出来（权限、刚好被删）就走下面的流式发送，别把文件卡死在这
+  }
+
+  res.writeHead(200, {
+    ...headers,
+    'Content-Type': type,
+    'Content-Length': st.size,
+    'Cache-Control': cache,
+  });
+  fss.createReadStream(filePath).pipe(res);
 }
 
 const safeJoin = (base, rel) => {
@@ -446,6 +679,18 @@ async function bootstrapIfEmpty(host) {
 }
 
 // ---------- 路由 ----------
+
+/**
+ * 功耗常数来自用户设置，会改变快照里 power 那一块的数字。
+ * 后台预热、/api/monitor/stats、/api/monitor/ping 三处必须传同一份 ——
+ * 传不一样的话，同一份缓存会被两套参数来回覆盖，每次都判定「参数变了」重新采。
+ */
+const powerOptsOf = (s) => ({
+  powerTdpW: s.settings.power?.tdpW,
+  powerBaseW: s.settings.power?.baseW,
+  powerDiskW: s.settings.power?.diskW,
+});
+
 async function handleApi(req, res, url) {
   const p = url.pathname;
   const method = req.method;
@@ -586,13 +831,10 @@ async function handleApi(req, res, url) {
     /*
      * 主路径：自己采。读 /host/proc 与 /host/sys，不依赖任何外部应用。
      * 任何异常都吞掉并回落到 fnMonitor —— 少个传感器不该让整块面板空着。
+     * 后台预热已经把这个缓存刷好了，这里正常只是一次内存读取。
      */
     try {
-      const snap = await systemSnapshot({
-        powerTdpW: s.settings.power?.tdpW,
-        powerBaseW: s.settings.power?.baseW,
-        powerDiskW: s.settings.power?.diskW,
-      });
+      const snap = await systemSnapshot(powerOptsOf(s));
       // 容器占用走缓存，不等采集（首次会返回 pending，前端显示「采集中」）
       snap.containers = await containerStats({ wait: false });
       // 面板的「来源」标记：自采时不显示外部依赖
@@ -649,7 +891,8 @@ async function handleApi(req, res, url) {
   // 探活：自采模式下看宿主机 procfs 能不能读到；否则检查 fnMonitor 地址
   if (p === '/api/monitor/ping' && method === 'GET') {
     try {
-      const snap = await systemSnapshot();
+      // 参数必须和 stats 一致，否则会把缓存键顶掉，让下一次 stats 白重采一轮
+      const snap = await systemSnapshot(powerOptsOf(await store.load()));
       if (snap?.online) return json(res, 200, { ok: true, status: 200, source: 'native' });
     } catch {
       /* 自采不通，落到下面探外部地址 */
@@ -796,23 +1039,26 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/icons/')) {
       const f = safeJoin(ICON_DIR, p.slice(7));
       if (!f) return text(res, 400, 'bad path');
-      return serveFile(res, f, { cache: 'public, max-age=604800' });
+      return serveFile(req, res, f, { cache: 'public, max-age=604800' });
     }
     if (p.startsWith('/backgrounds/')) {
       const f = safeJoin(BG_DIR, p.slice(13));
       if (!f) return text(res, 400, 'bad path');
-      return serveFile(res, f, { cache: 'public, max-age=604800' });
+      return serveFile(req, res, f, { cache: 'public, max-age=604800' });
     }
 
     if (p === '/' || p === '/index.html') {
       // 打开首页时若还没卡片，后台补一次采集（不阻塞响应）
       bootstrapIfEmpty(hostOf(req)).catch(() => {});
-      return serveFile(res, path.join(CONFIG.publicDir, 'index.html'), { cache: 'no-store' });
+      return serveIndex(req, res);
     }
 
     const f = safeJoin(CONFIG.publicDir, p);
     if (!f) return text(res, 400, 'bad path');
-    return serveFile(res, f, { cache: p.startsWith('/assets/') ? 'public, max-age=86400' : 'no-cache' });
+    return serveFile(req, res, f, {
+      cache: p.startsWith('/assets/') ? 'public, max-age=86400' : 'no-cache',
+      version: url.searchParams.get('v') || '',
+    });
   } catch (e) {
     // 业务错误（上传超限之类）带自己的状态码；其它一律 500，且不把内部信息回给客户端
     const code = e instanceof HttpError ? e.status : 500;
@@ -836,10 +1082,38 @@ server.on('upgrade', async (req, socket, head) => {
 });
 
 await store.load();
-// 预热：CPU / 网络 / 功耗都是差分型指标，先采一次底，第一次打开面板就有值
-warmup().catch(() => {});
+/*
+ * 预热：CPU / 网络 / 功耗都是差分型指标，先采一次底，第一次打开面板就有值。
+ * 预热完之后再挂后台采样 —— 顺序反了的话，第一轮会和预热抢着写差分基线。
+ */
+warmup()
+  .catch(() => {})
+  .then(() => startMetricsWatcher(async () => powerOptsOf(await store.load())));
 // 容器资源占用放后台常驻采，别堵在请求路径里（单个 stats 要 1 秒，25 个等不起）
 startContainerWatcher();
+
+/**
+ * 预热静态资源：首页和它的 CSS/JS 提前读进内存、两种编码都先压好。
+ * 不这么做的话，第一次访问要现场压 app.js（brotli 约 10ms），
+ * 那 10ms 正好压在有人在等的那条请求上。
+ */
+async function warmupAssets() {
+  const files = ['js/app.js', 'js/lunar.js', 'css/style.css', 'css/fn-theme.css'];
+  for (const rel of files) {
+    const e = await loadAsset(path.join(CONFIG.publicDir, rel)).catch(() => null);
+    if (!e || e.buf.length < MIN_COMPRESS_BYTES) continue;
+    // 两种都压：第一个访客走 br 还是 gzip 全看它的浏览器
+    packBuffer(e.buf, e.hash, 'br');
+    packBuffer(e.buf, e.hash, 'gzip');
+  }
+  // 首页得等依赖哈希就位才能拼出来，所以放最后
+  const idx = await loadAsset(INDEX_FILE).catch(() => null);
+  if (!idx) return;
+  const { buf, hash } = await versionedIndex(idx);
+  packBuffer(buf, hash, 'br');
+  packBuffer(buf, hash, 'gzip');
+}
+
 server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`[fnstart] 已启动 → http://${CONFIG.host}:${CONFIG.port}`);
   console.log(`[fnstart] 数据目录 ${CONFIG.dataDir}`);
@@ -851,7 +1125,9 @@ server.listen(CONFIG.port, CONFIG.host, () => {
    */
   if (AUTH_HASH) {
     const n = String(CONFIG.accessToken).length;
-    console.log(`[fnstart] 访问保护：已开启（令牌 ${n} 位，cookie 30 天滑动续期）`);
+    console.log(
+      `[fnstart] 访问保护：已开启（令牌 ${n} 位，cookie ${Math.round(AUTH_MAX_AGE / 86400)} 天滑动续期）`,
+    );
     if (n < 16) {
       console.warn('[fnstart] 令牌偏短，建议至少 16 位：openssl rand -hex 16');
     }
@@ -860,6 +1136,8 @@ server.listen(CONFIG.port, CONFIG.host, () => {
     console.warn('[fnstart] 只要端口能被本机以外访问，就该设 ACCESS_TOKEN，见 README「访问令牌的一生」');
   }
   probeMonitor();
+  // 预热放在 listen 回调里、且不 await：服务已经能接请求了，别让启动流程等它
+  warmupAssets().catch(() => {});
 });
 
 /**

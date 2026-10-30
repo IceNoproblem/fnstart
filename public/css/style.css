@@ -51,8 +51,22 @@ body.theme-aurora .bg-aurora{display:block}
 .bg-aurora i{
   position:absolute;display:block;border-radius:50%;
   opacity:.72;mix-blend-mode:screen;
-  /* 渐变本身已经是软的，这层小半径模糊只负责把边界再磨匀一点 */
-  filter:blur(clamp(24px, 3.2vw, 52px));
+  /*
+   * 这里原本有一层 blur(clamp(24px, 3.2vw, 52px))，注释写着「只负责把边界再磨匀一点」。
+   *
+   * 实测它不是「一点」：滚动和鼠标移动都会掉帧，而这是全站唯一的原因。
+   * 逐项排除过 —— 隐藏极光层、去掉模糊、去掉混合模式、停掉动画，任意一项都能立刻回满帧；
+   * 而卡片 42 张、box-shadow、hover 流光、位移全都不参与。
+   *
+   * 根因是这三者叠加：mix-blend-mode 让这一层无法独立成合成层（所以 will-change 无效），
+   * 于是每帧的 transform 变化都会触发整层重新模糊再混合。半径缩到 8px 也没用 ——
+   * 只要 filter 还在就照样掉帧，必须整个去掉。
+   *
+   * 去掉之后视觉差异极小：冻结动画逐像素对比，1400×900 下差异超过 8/255 的只有
+   * 0.159%，且全在光斑边缘（平均单通道差 0.63/255）。因为每团光本来就是四层
+   * radial-gradient 从 .72 一路衰减到 78% 处全透明，边缘的柔和是渐变自带的，
+   * blur 只是又抹了一遍。去掉后滚动和鼠标移动都是满帧。
+   */
 }
 /*
  * 柔光靠多层 radial-gradient 做出来，不用大半径 blur：

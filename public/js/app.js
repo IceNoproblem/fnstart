@@ -1312,6 +1312,10 @@ function openSettings() {
   $('#sBlur').value = s.background.blur || 0;
   $('#sDim').value = Math.round((s.background.dim ?? 0.15) * 100);
   $('#sGrain').checked = s.background.grain !== false;
+  const fx = s.fx || {};
+  $('#sFxGlass').checked = fx.glass !== false;
+  $('#sFxCardAnim').checked = fx.cardAnim !== false;
+  $('#sFxBgAnim').checked = fx.bgAnim !== false;
   $('#sMonitorStats').checked = s.monitor.showStats !== false;
   $('#sMonEnabled').checked = !!s.monitor.enabled;
   $('#sMonCollapsed').checked = monView() === 'collapsed';
@@ -1408,6 +1412,9 @@ $('#sDim').addEventListener('input', (e) => {
   saveSettings({ background: { dim: Number(e.target.value) / 100 } });
 });
 $('#sGrain').addEventListener('change', (e) => saveSettings({ background: { grain: e.target.checked } }));
+$('#sFxGlass').addEventListener('change', (e) => saveSettings({ fx: { glass: e.target.checked } }));
+$('#sFxCardAnim').addEventListener('change', (e) => saveSettings({ fx: { cardAnim: e.target.checked } }));
+$('#sFxBgAnim').addEventListener('change', (e) => saveSettings({ fx: { bgAnim: e.target.checked } }));
 $('#sMonitorStats').addEventListener('change', (e) => saveSettings({ monitor: { showStats: e.target.checked } }));
 $('#sMonEnabled').addEventListener('change', (e) => saveSettings({ monitor: { enabled: e.target.checked } }));
 $('#sMonCollapsed').addEventListener('change', (e) =>
@@ -2671,6 +2678,22 @@ el.sheetMask.addEventListener('click', () =>
 );
 
 /* ---------------- 背景 / 全局应用 ---------------- */
+/**
+ * 应用「视觉效果」开关。
+ *
+ * 这三项都是纯装饰，关掉只影响观感、不影响任何功能。做成可关的原因是：
+ * 在个别 Chromium(macOS) 组合上，大面积的 backdrop-filter / 混合模式 / 持续动画
+ * 会触发合成层面的闪烁，而那是浏览器的问题，页面这边唯一能做的是让用户能关掉。
+ * class 挂在 <html> 上，和地址栏的 ?off= 开关共用同一套规则。
+ */
+function applyFx() {
+  const f = state.settings.fx || {};
+  const html = document.documentElement;
+  html.classList.toggle('no-glass', f.glass === false);
+  html.classList.toggle('no-cardanim', f.cardAnim === false);
+  html.classList.toggle('no-bganim', f.bgAnim === false);
+}
+
 function applyBackground() {
   const b = state.settings.background;
   const body = document.body;
@@ -2698,6 +2721,7 @@ function applyAll() {
   applyUiScale(state.settings.ui?.scale);
   applyTopOrder(state.settings.layout?.topOrder);
   applyBackground();
+  applyFx();
   applyEngine();
   applyMonitor();
   loadWeather();

@@ -1317,3 +1317,43 @@ body.layout-focus .topbar,
 body.layout-focus .search-row{ display: none; }
 body.layout-focus .stage{ display: block; min-height: 100vh; padding-top: 22px; }
 body.layout-focus .monitor{ width: 100%; margin: 0; padding-bottom: 32px; }
+
+/* ============ 视觉效果开关 ============
+ * 设置面板里的「视觉效果」和地址栏的 ?off=/plain 共用这套 class，
+ * class 挂在 <html> 上（`no-grain` 例外，它历史上挂在 body 上，两个都认）。
+ *
+ * 存在的理由：这些大面积效果在个别 Chromium(macOS) 组合上会触发合成层闪烁，
+ * 那是浏览器的问题，页面能做的是让用户能关掉，而不是删掉这些效果。
+ */
+html.no-glass *,
+html.no-glass *::before,
+html.no-glass *::after{
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+}
+/*
+ * 关掉毛玻璃之后的补偿。
+ *
+ * 这些元素原本靠极低的背景 alpha（.04~.075）配 backdrop-filter 出「磨砂」质感，
+ * 只删 filter 会变成一层几乎看不见的淡白，比开着还难看。
+ * 所以补一个深色半透明底色，观感接近「实心磨砂」——不再透出背景细节，但层次还在。
+ */
+html.no-glass .tool-btn{background:rgba(30,38,56,.80)}
+html.no-glass .searchbar{background:linear-gradient(180deg,rgba(32,41,60,.84),rgba(18,24,38,.80))}
+html.no-glass .chip{background:linear-gradient(180deg,rgba(30,39,57,.82),rgba(18,24,38,.78))}
+html.no-glass .fn-pill{background:linear-gradient(160deg,rgba(44,58,88,.99),rgba(18,25,42,.99))}
+html.no-glass .popover,
+html.no-glass .ctx-menu{background:rgba(21,27,43,.97)}
+html.no-glass .toast{background:rgba(26,33,50,.97)}
+html.no-glass .engine-menu{background:rgba(21,27,43,.97)}
+html.no-glass .fab{background:rgba(30,38,56,.92)}
+html.no-glass .modal-card{background:rgba(17,22,35,.98)}
+html.no-cardanim .card{animation:none!important}
+html.no-cardanim .card-glow{display:none!important}
+html.no-bganim .bg-aurora i{animation:none!important}
+html.no-bganim .mon-dot{animation:none!important}
+html.no-aurora .bg-aurora{display:none!important}
+html.no-grain .bg-grain,
+body.no-grain .bg-grain{display:none!important}
+html.no-glow .card-glow{display:none!important}
+html.no-shadow .card{box-shadow:0 0 0 1px rgba(255,255,255,.07)!important}

@@ -8,6 +8,23 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1120'/%3E%3Cpath d='M20 26h24M20 34h16M20 42h20' stroke='%236ee7ff' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/style.css">
 <!--
+  诊断开关：地址加 ?plain=1 就关掉所有可能触发 Chromium 合成异常的效果，
+  用来定位「Edge 在 macOS 上整片闪」到底由哪一项引起。默认不生效，不影响正常外观。
+-->
+<script>
+  (function () {
+    var q = location.search, c = document.documentElement.className;
+    if (/[?&]plain(=|&|$)/.test(q)) c += ' no-glass no-cardanim no-bganim no-grain';
+    var m = q.match(/[?&]off=([\w,]+)/);
+    if (m) {
+      var map = { glass: 'no-glass', cardanim: 'no-cardanim', bganim: 'no-bganim',
+                  grain: 'no-grain', aurora: 'no-aurora', glow: 'no-glow', shadow: 'no-shadow' };
+      m[1].split(',').forEach(function (k) { if (map[k]) c += ' ' + map[k]; });
+    }
+    document.documentElement.className = c.trim();
+  })();
+</script>
+<!--
   提前把 app.js 拉下来。它是页面里最大的一块，标签在 body 末尾 —— 等 HTML 解析到
   那里才开始下载，等于白白排在 17KB 的 HTML 后面。这里让下载和 CSS 解析同时开始。
   href 要和文末那个脚本标签完全一致（含服务端注入的 ?v=），否则会下两份。
@@ -263,6 +280,14 @@
       <div class="field row">
         <label class="switch"><input type="checkbox" id="sGrain"><span></span>噪点纹理</label>
         <label class="switch"><input type="checkbox" id="sMonitorStats"><span></span>折叠时显示实时指标</label>
+      </div>
+      <div class="field">
+        <label>视觉效果<small>页面出现闪动、发糊或卡顿时，可以逐项关掉排查</small></label>
+        <div class="field row" style="margin:0">
+          <label class="switch"><input type="checkbox" id="sFxGlass"><span></span>毛玻璃质感</label>
+          <label class="switch"><input type="checkbox" id="sFxCardAnim"><span></span>卡片动效</label>
+          <label class="switch"><input type="checkbox" id="sFxBgAnim"><span></span>背景缓动</label>
+        </div>
       </div>
       <div class="field">
         <label>每行列数</label>

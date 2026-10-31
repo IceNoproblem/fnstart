@@ -1,9 +1,18 @@
+# 两个服务共用同一个本地镜像 fnstart:latest。
+# 启动时 compose 会先试着去 Docker Hub 拉这个名字，日志最前面那两行
+#   fnstart Pulling / docker-proxy Pulling ... context deadline exceeded
+# 就是它 —— 拉不到是**正常**的，接着会用下面 build 出来的本地镜像，不影响结果。
+# 真正会让构建失败的是基础镜像 node:22-alpine 拉不到，那个在 .env 里改 NODE_IMAGE。
 services:
   # Docker socket 的「只读小窗口」。只有它挂 socket，只放行三个 GET 端点，
   # 其它一律 403（详细说明见 docker-proxy.mjs 顶部）。
   # 有了它，fnStart 主容器被攻破的后果从「宿主机 root」降到「只能读容器列表」。
   docker-proxy:
-    build: .
+    build:
+      context: .
+      args:
+        # 拉不到 docker.io 时在 .env 里换源，见 .env.example
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     image: fnstart:latest
     container_name: fnstart-docker-proxy
     restart: unless-stopped
@@ -27,7 +36,10 @@ services:
         max-file: "1"
 
   fnstart:
-    build: .
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     image: fnstart:latest
     container_name: fnstart
     restart: unless-stopped

@@ -54,7 +54,7 @@ for c in "$NAME" "$PROXY"; do
   if docker ps -a --format '{{.Names}}' | grep -qx "$c"; then
     proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
     if [ -z "$proj" ]; then
-      say "检测到旧的 docker run 容器 $c，重建（卡片数据不受影响）"
+      say "检测到旧的 docker run 容器 ${c}，重建（卡片数据不受影响）"
       docker rm -f "$c" >/dev/null
     fi
   fi
@@ -95,19 +95,38 @@ elif docker compose version >/dev/null 2>&1; then
   use_compose=1
 fi
 
+# 基础镜像：命令行给的优先，其次 .env（compose 会自己读 .env，脚本得手动读一份，
+# 否则「在 .env 里换了源、脚本这边还在拉 docker.io」）
+if [ -z "${NODE_IMAGE:-}" ] && [ -f .env ]; then
+  NODE_IMAGE=$(sed -n 's/^NODE_IMAGE=//p' .env | tail -1)
+fi
+IMG=${NODE_IMAGE:-node:22-alpine}
+
 if [ "$use_compose" = 1 ]; then
   say "启动容器（第一次要构建镜像，一两分钟）"
   # 构建日志太吵，只在失败时把最后几行甩出来 —— 成功就安静
   LOG=$(mktemp)
-  if ! docker compose up -d --build >"$LOG" 2>&1; then
+  if docker compose up -d --build >"$LOG" 2>&1; then
+    rm -f "$LOG"
+  else
     echo
     tail -20 "$LOG"
     echo
-    die "启动失败。完整日志：$LOG（也可以换成 README 里的 docker run 方式）"
+    # 最常见的两种构建失败跟代码无关：连不上 Docker Hub 拉不到基础镜像，
+    # 或者构建目录里根本没有 Dockerfile。这两条都能绕 —— docker run 把源码
+    # 直接挂进容器跑，不构建镜像、不需要 Dockerfile，只要机器上有个 node 镜像。
+    warn "compose 构建失败（完整日志：${LOG}），改用 docker run 挂源码的方式重试"
+    use_compose=0
   fi
-  rm -f "$LOG"
-else
-  say "没有 compose 插件，用 docker run 起两个容器（应用 + socket 代理）"
+fi
+
+if [ "$use_compose" = 0 ]; then
+  say "用 docker run 起两个容器（应用 + socket 代理），不构建镜像"
+  if ! docker image inspect "$IMG" >/dev/null 2>&1; then
+    say "本地没有 ${IMG}，先拉一次（只拉基础镜像，比构建省事得多）"
+    docker pull "$IMG" || die "拉不到 ${IMG}。换成能访问的镜像源再跑：
+  sudo NODE_IMAGE=<你的镜像源>/library/node:22-alpine bash scripts/install.sh"
+  fi
   # 1) socket 代理：只有它挂 docker.sock，只放行只读端点
   docker rm -f "$PROXY" >/dev/null 2>&1 || true
   docker run -d --name "$PROXY" \
@@ -115,7 +134,7 @@ else
     -v "$DIR":/app:ro \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
     -w /app -e PROXY_LISTEN=127.0.0.1:2375 \
-    node:22-alpine node docker-proxy.mjs >/dev/null
+    "$IMG" node docker-proxy.mjs >/dev/null
 
   # 2) 主应用：**不挂** socket，通过代理读容器列表
   docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -127,12 +146,12 @@ else
     -w /app -e PORT=3721 -e DATA_DIR=/data \
     -e DOCKER_SOCK=http://127.0.0.1:2375 \
     --env-file <(grep -E '^(ACCESS_TOKEN)=' .env) \
-    node:22-alpine node server.js >/dev/null
+    "$IMG" node server.js >/dev/null
 fi
 
 # ---------- 4. 结果 ----------
 sleep 2
-IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+IP=$(hostname -I 2>/dev/null | awk '{print $1}') || true
 [ -n "${IP:-}" ] || IP="你的NAS地址"
 
 echo
@@ -148,7 +167,7 @@ else
   echo "  令牌：  沿用原来的（grep ACCESS_TOKEN $DIR/.env）"
 fi
 echo
-echo "  安全：  Docker socket 已收进只读代理（$PROXY），主容器碰不到 socket"
+echo "  安全：  Docker socket 已收进只读代理（${PROXY}），主容器碰不到 socket"
 echo "  想要右侧监控面板（可选）："
 echo "    sudo bash $DIR/scripts/install-fnmonitor.sh"
 echo "────────────────────────────────────────"

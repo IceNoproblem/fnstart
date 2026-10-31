@@ -1,0 +1,20 @@
+# 构建上下文只留 Dockerfile 真正 COPY 的东西：
+# package.json / server.js / docker-proxy.mjs / lib / public / scripts
+#
+# 其余的进来只会让上传变慢。更麻烦的是：网络差的时候 context 传一半就断，
+# buildkit 拿到的 dockerfile 是空的，报出来的却是
+#   failed to read dockerfile: open Dockerfile: no such file or directory
+# 看起来像「文件不存在」，实际是「没传完」——这个坑真的踩过。
+
+.git
+.github
+.gitignore
+.env
+.env.local
+data
+docs
+node_modules
+docker-compose*.yml
+*.md
+LICENSE
+.DS_Store

@@ -1,5 +1,11 @@
 # fnStart · 飞牛开始页 —— 零依赖运行，镜像里只有 Node 和源码
-FROM node:22-alpine
+
+# 基础镜像可换：拉不到 docker.io 时，在 .env 里写一行
+#   NODE_IMAGE=<你的镜像源>/library/node:22-alpine
+# compose 会把它透传进来（见 docker-compose.yml 的 build.args）。
+# 直接 docker build 就用 --build-arg NODE_IMAGE=...
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE}
 
 LABEL org.opencontainers.image.title="fnstart" \
       org.opencontainers.image.description="飞牛开始页：飞牛 NAS 专属的浏览器主页，自动发现服务 + 融合飞牛监控" \

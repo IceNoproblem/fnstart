@@ -97,8 +97,10 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 
 | 卡在哪 | 怎么办 |
 |---|---|
+| `failed to read dockerfile` / `open Dockerfile: no such file or directory` | 构建目录里**没有 Dockerfile**。`build: .` 里的 `.` 指的是「compose 文件所在目录」——只贴了 `docker-compose.yml`、没放源码，就一定是这个错。`ls Dockerfile` 确认一下，没有就重新 `git clone` 全量源码（别用 ZIP 解压后套了一层的目录） |
+| `context deadline exceeded` / 拉不到 `node:22-alpine` | 连不上 Docker Hub。在 `.env` 里加一行 `NODE_IMAGE=<你能访问的镜像源>/library/node:22-alpine`，再 `docker compose up -d --build` |
 | 页面打不开 | `docker logs fnstart --tail 20`，看最后一行 |
-| 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，改用下面「其它装法 → docker run」 |
+| 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，先按上面换 `NODE_IMAGE`；还是不行就改用下面「其它装法 → docker run」（不构建镜像，也就不需要 Dockerfile） |
 | 忘了令牌 | `grep ACCESS_TOKEN /vol1/docker/fnstart/.env` |
 | 右边读不到监控 | 看容器有没有挂到宿主 sysfs：`docker exec fnstart ls /host/sys/class/hwmon`，有输出就有数据 |
 | 监控里没有温度/风扇/功耗 | 同上，说明 `/sys` 没挂。CPU、内存、网络、磁盘不受影响 |
@@ -116,7 +118,9 @@ cd /vol1/docker/fnstart
 docker compose up -d --build
 ```
 
-**docker run 两行流**（没有 compose 插件，或镜像拉不到时用）
+**docker run 两行流**（没有 compose 插件，或构建不起来时用）
+
+这条路**不构建镜像、也不需要 Dockerfile**：源码直接挂进去，容器只是那个 node 镜像。唯一要求是机器上有个 Node 22 镜像——`node:22-alpine` 拉不到的话，把下面两处镜像名换成你能访问的源。
 
 先起 socket 代理，只有它挂 socket：
 
@@ -150,7 +154,16 @@ git clone https://github.com/IceNoproblem/fnstart.git && cd fnstart
 PORT=3721 DATA_DIR=./data node server.js
 ```
 
-**飞牛图形界面** — 把 `docker-compose.yml` 贴进「Docker → 项目 → 新建」，项目路径填 `/vol1/docker/fnstart`。目录里得有源码，镜像是从源码构建的。
+**飞牛图形界面** — 项目路径填 `/vol1/docker/fnstart`。**点「创建」之前，这个目录里必须已经有源码**，镜像是从源码构建的：
+
+```bash
+# SSH 里先跑，目录已存在、里面已有 compose 文件也行，这一步只补源码
+git clone --depth 1 https://github.com/IceNoproblem/fnstart.git /tmp/fnstart-src
+cp -a /tmp/fnstart-src/. /vol1/docker/fnstart/
+rm -rf /tmp/fnstart-src
+```
+
+顺序反过来（先建项目、只把 yml 贴进去）会报 `open Dockerfile: no such file or directory`——`build: .` 里的 `.` 只认 compose 文件所在目录，目录空着就没有 Dockerfile 可读。
 
 </details>
 
@@ -407,7 +420,7 @@ Tailscale / WireGuard 组网之后，出门直接开 `http://100.x.x.x:3721`，�
 天气走 open-meteo，需要外网。墙内偶尔抽风，失败会退回上次成功的快照（6 小时内有效），一般只短暂显示旧数据。
 
 **改了代码为什么没生效？**
-`docker restart` 只重启进程，不换代码——`/app` 里的文件是构建进镜像的，不是挂载的。改完源码必须 `docker compose up -d --build`。判断方法：`docker exec fnstart grep 新函数名 /app/lib/xxx.js`，搜不到就是没重建。（这个坑我自己踩过。）
+看你是怎么装的：compose 装的话 `/app` 里的文件是构建进镜像的，`docker restart` 只重启进程、不换代码，改完源码必须 `docker compose up -d --build`，判断方法是 `docker exec fnstart grep 新函数名 /app/lib/xxx.js`，搜不到就是没重建（这个坑我自己踩过）。如果是 docker run 装的（安装脚本构建失败时会自动退回这条路），源码是挂进去的，`docker restart fnstart` 就生效。
 
 **改了设置为什么不生效？**
 设置在 `data/data.json` 里，本来就存着。如果你是直接改这个文件，需要重启容器——进程里有一份缓存。

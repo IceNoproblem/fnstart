@@ -13,7 +13,7 @@ services:
       args:
         # 拉不到 docker.io 时在 .env 里换源，见 .env.example
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
-    image: fnstart:latest
+    image: ${FNSTART_IMAGE:-fnstart:latest}
     container_name: fnstart-docker-proxy
     restart: unless-stopped
     # 和主容器一样用 host 网络，这样能绑到 127.0.0.1:2375，
@@ -40,7 +40,7 @@ services:
       context: .
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
-    image: fnstart:latest
+    image: ${FNSTART_IMAGE:-fnstart:latest}
     container_name: fnstart
     restart: unless-stopped
     # 前置依赖：飞牛监控 fnMonitor —— 第三方开源应用（MIT，github.com/MisiteQ/fnmonitor），

@@ -1,0 +1,52 @@
+name: docker
+
+# 只在打 tag（v1.7.1 这种）或手动触发时构建，普通提交不占用额度。
+# 多架构一起出：飞牛的机器有 x86 也有 arm，只出 amd64 会让一部分人拉到之后跑不起来。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # arm64 靠 QEMU 模拟构建，比原生慢，但一次构建换来两种机器都能跑。
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      # 凭据只从仓库 secrets 读，不写进任何文件。
+      # DOCKERHUB_USERNAME = Docker Hub 用户名
+      # DOCKERHUB_TOKEN    = Docker Hub → Account settings → Security → New Access Token
+      #                      （用 token 不要用登录密码）
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # v1.7.1 → 1.7.1 / 1.7 / latest 三个 tag 一起打。
+      # 老版本的人写 1.7 就能自动跟小版本，写 latest 永远最新。
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/fnstart
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 层缓存放 GitHub Actions 缓存里，第二次构建快很多
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -108,7 +108,23 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 | 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
 <details>
-<summary><b>其它装法</b> — 手动 compose / docker run / 不用 Docker / 飞牛图形界面</summary>
+<summary><b>其它装法</b> — 用现成镜像 / 手动 compose / docker run / 不用 Docker / 飞牛图形界面</summary>
+
+**用现成镜像**（不构建、不需要 Dockerfile、不需要源码）
+
+自己机器拉不动基础镜像、或者只是想快点跑起来时用这条。先在 `.env` 里写一行：
+
+```bash
+FNSTART_IMAGE=icenoproblem/fnstart:latest
+```
+
+然后：
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+镜像有 `linux/amd64` 和 `linux/arm64` 两个架构，飞牛的 x86 机器和 arm 机器都能用。**前提是这台机器拉得到 Docker Hub**——国内直连一般不通，得先给 daemon 配个镜像加速（飞牛自带的那个就够）。
 
 **手动 compose**（不想用安装脚本）
 

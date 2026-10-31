@@ -66,14 +66,16 @@
 ### 1 · 粘这一块
 
 ```bash
-git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
-cd /vol1/docker/fnstart
-sudo bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/IceNoproblem/fnstart/main/scripts/deploy.sh | sudo bash
 ```
+
+它干四件事：下 compose 文件 → 生成访问令牌 → 拉现成镜像 → 起容器。**不构建、不需要源码**，一句就完事。
 
 看到 `✓ 装好了` 就成了。脚本会打印**访问地址**和**访问令牌**——令牌只显示这一次，马上抄进密码管理器。
 
-<sub>第一行拉不动（国内常见）：把 `https://github.com/` 换成 `https://ghfast.top/https://github.com/`。</sub>
+<sub>国内拉不动 `raw.githubusercontent.com`（大概率）：把 URL 前的 `https://` 换成 `https://ghfast.top/https://`。即 `curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/...`。</sub>
+
+<sub>想改代码、自己构建：`git clone` 下来跑 `sudo bash scripts/install.sh`，那条路会本地构建镜像（约 10 秒，需要拉得到 `node:22-alpine`）。</sub>
 
 ### 2 · 打开
 
@@ -99,6 +101,7 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 |---|---|
 | `failed to read dockerfile` / `open Dockerfile: no such file or directory` | 构建目录里**没有 Dockerfile**。`build: .` 里的 `.` 指的是「compose 文件所在目录」——只贴了 `docker-compose.yml`、没放源码，就一定是这个错。`ls Dockerfile` 确认一下，没有就重新 `git clone` 全量源码（别用 ZIP 解压后套了一层的目录） |
 | `context deadline exceeded` / 拉不到 `node:22-alpine` | 连不上 Docker Hub。在 `.env` 里加一行 `NODE_IMAGE=<你能访问的镜像源>/library/node:22-alpine`，再 `docker compose up -d --build` |
+| 一行命令跑完卡在拉镜像 | 这台机器连不上 Docker Hub。给 daemon 配个镜像加速器（飞牛「Docker → 设置 → 镜像源」）再重跑同一条命令 |
 | 页面打不开 | `docker logs fnstart --tail 20`，看最后一行 |
 | 卡在构建镜像 | NAS 拉不到 `node:22-alpine`，先按上面换 `NODE_IMAGE`；还是不行就改用下面「其它装法 → docker run」（不构建镜像，也就不需要 Dockerfile） |
 | 忘了令牌 | `grep ACCESS_TOKEN /vol1/docker/fnstart/.env` |
@@ -108,19 +111,14 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 | 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
 <details>
-<summary><b>其它装法</b> — 用现成镜像 / 手动 compose / docker run / 不用 Docker / 飞牛图形界面</summary>
+<summary><b>其它装法</b> — 手动拉镜像 / 源码构建 / docker run / 不用 Docker / 飞牛图形界面</summary>
 
-**用现成镜像**（不构建、不需要 Dockerfile、不需要源码）
-
-自己机器拉不动基础镜像、或者只是想快点跑起来时用这条。先在 `.env` 里写一行：
+**不用脚本，手动拉镜像**（不想 `curl | bash` 的走这条，效果一样）
 
 ```bash
-FNSTART_IMAGE=icenoproblem/fnstart:latest
-```
-
-然后：
-
-```bash
+mkdir -p /vol1/docker/fnstart && cd /vol1/docker/fnstart
+curl -fsSLO https://raw.githubusercontent.com/IceNoproblem/fnstart/main/docker-compose.yml
+printf 'FNSTART_IMAGE=icenoproblem/fnstart:latest\nACCESS_TOKEN=%s\n' "$(openssl rand -hex 16)" > .env
 docker compose pull && docker compose up -d
 ```
 

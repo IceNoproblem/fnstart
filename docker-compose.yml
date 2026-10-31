@@ -52,7 +52,7 @@ services:
     # 从而发现「没做端口映射」的 host 网络容器，以及不是 Docker 安装的飞牛服务（5666 / 8777）。
     network_mode: host
     environment:
-      PORT: 3721
+      PORT: ${PORT:-3721}
       DATA_DIR: /data
       # 走 docker-proxy，不直接挂 socket。想退回旧行为就改成 /var/run/docker.sock
       # （并把下面那行 volumes 里的 socket 挂回来）。

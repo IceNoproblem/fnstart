@@ -1,0 +1,25 @@
+# 源码构建叠加层 —— 只有要自己编译时才用得上。
+#
+# 普通安装**不需要这个文件**：默认的 docker-compose.yml 只拉现成镜像，
+# 不碰 Dockerfile，所以「只下了 yml、没源码」也不会报
+#   failed to read dockerfile: open Dockerfile: no such file or directory
+#
+# 用法：
+#   git clone https://github.com/IceNoproblem/fnstart.git && cd fnstart
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# scripts/install.sh 走的就是这条路。拉不到 Docker Hub 时在 .env 里改：
+#   NODE_IMAGE=<能访问的镜像源>/library/node:22-alpine
+
+services:
+  docker-proxy:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+
+  fnstart:
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}

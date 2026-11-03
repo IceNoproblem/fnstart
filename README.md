@@ -77,6 +77,71 @@ curl -fsSL https://raw.githubusercontent.com/IceNoproblem/fnstart/main/scripts/d
 
 <sub>想改代码、自己构建：`git clone` 下来跑 `sudo bash scripts/install.sh`，那条路会本地构建镜像（约 10 秒，需要拉得到 `node:22-alpine`）。</sub>
 
+### 纯 docker compose 装法（不想 `curl | bash` 走这条）
+
+下面这份就是完整的 `docker-compose.yml`，直接复制存成文件就能用。它**只拉现成镜像、不构建**，所以不需要源码、不需要 Dockerfile、也不需要 `node:22-alpine`。
+
+```yaml
+services:
+  docker-proxy:
+    image: icenoproblem/fnstart:latest
+    container_name: fnstart-docker-proxy
+    restart: unless-stopped
+    network_mode: host
+    command: ["node", "docker-proxy.mjs"]
+    environment:
+      PROXY_LISTEN: 127.0.0.1:2375
+      DOCKER_SOCK_INNER: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      disable: true
+
+  fnstart:
+    image: icenoproblem/fnstart:latest
+    container_name: fnstart
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: 3721
+      DATA_DIR: /data
+      DOCKER_SOCK: http://127.0.0.1:2375
+      PROBE_TIMEOUT: 2500
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      TRUST_PROXY: "1"
+    cap_drop: [ALL]
+    cap_add: [SYS_PTRACE, DAC_OVERRIDE, DAC_READ_SEARCH]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./data:/data
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+```
+
+使用步骤：
+
+1. 把上面这份存成 `docker-compose.yml`
+2. 在同目录建 `.env`，填访问令牌（纯内网可留空，要暴露公网必须设）：
+   ```bash
+   printf 'ACCESS_TOKEN=%s\n' "$(openssl rand -hex 16)" > .env
+   ```
+3. 启动：
+   ```bash
+   docker compose up -d
+   ```
+
+看到 `docker compose ps` 里两个容器都是 `running` 就成了。令牌在 `.env`，随时 `grep ACCESS_TOKEN .env` 查。
+
+（不想自己存文件，也可以直接下载仓库里这份带注释的完整版：`curl -fsSLO https://raw.githubusercontent.com/IceNoproblem/fnstart/main/docker-compose.yml`，再建 `.env` 走上面第 2、3 步。）
+
+几个要点：
+
+- **只拉镜像、不构建**：这份 compose 里没有 `build:`，只有 `image: icenoproblem/fnstart:latest`。以前把 `build:` 写在这儿，镜像拉不到时 compose 会自动回退到本地构建，而只下了 yml 的机器没有 Dockerfile，就报 `failed to read dockerfile` —— 看起来像文件丢了，其实只是网络问题。所以构建单独放进了 `docker-compose.build.yml` 叠加层，**只用这份 yml 的人永远不会踩这个坑**。
+- **拉镜像要连 Docker Hub**。国内直连多半超时（`context deadline exceeded`）：给 daemon 配个镜像加速器（飞牛「Docker → 设置 → 镜像源」），或把上面下载 URL 换成 `https://ghfast.top/https://raw.githubusercontent.com/...`。
+- **多个存储卷**（`/vol2`、`/vol3`…）：compose 不写死卷，按机器实际存在的 `/volN` 建个 `docker-compose.override.yml` 只读挂进去，会自动合并。
+- **想改代码自己构建**：`git clone` 后 `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`。
+- 每个参数为什么这么写、镜像源替换的完整写法：见 [`docs/compose-install.md`](docs/compose-install.md)。
+
 ### 2 · 打开
 
 浏览器输入 `http://你的NAS地址:3721`，贴令牌，进去。
@@ -99,7 +164,7 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 
 | 卡在哪 | 怎么办 |
 |---|---|
-| `failed to read dockerfile` / `open Dockerfile: no such file or directory` | 构建目录里**没有 Dockerfile**。`build: .` 里的 `.` 指的是「compose 文件所在目录」——只贴了 `docker-compose.yml`、没放源码，就一定是这个错。`ls Dockerfile` 确认一下，没有就重新 `git clone` 全量源码（别用 ZIP 解压后套了一层的目录） |
+| `failed to read dockerfile` / `open Dockerfile: no such file or directory` | 你在用 `--build`，但目录里没有源码。默认那份 `docker-compose.yml` **只拉镜像、不构建**，不会报这个错；一旦加上 `--build` 或 `-f docker-compose.build.yml`，`build: .` 里的 `.` 就要求「compose 文件所在目录」里有 `Dockerfile`。`ls Dockerfile` 确认；没有就 `git clone` 全量源码（别用 ZIP 解压后套了一层的目录），或者干脆去掉 `--build` 改走拉镜像 |
 | `context deadline exceeded` / 拉不到 `node:22-alpine` | 连不上 Docker Hub。在 `.env` 里加一行 `NODE_IMAGE=<你能访问的镜像源>/library/node:22-alpine`，再 `docker compose up -d --build` |
 | 一行命令跑完卡在拉镜像 | 这台机器连不上 Docker Hub。给 daemon 配个镜像加速器（飞牛「Docker → 设置 → 镜像源」）再重跑同一条命令 |
 | 页面打不开 | `docker logs fnstart --tail 20`，看最后一行 |
@@ -111,26 +176,22 @@ sudo bash /vol1/docker/fnstart/scripts/install-fnmonitor.sh
 | 想整体体检 | `docker exec fnstart node /app/scripts/selftest.mjs` |
 
 <details>
-<summary><b>其它装法</b> — 手动拉镜像 / 源码构建 / docker run / 不用 Docker / 飞牛图形界面</summary>
+<summary><b>其它装法</b> — 源码构建 / docker run / 不用 Docker / 飞牛图形界面</summary>
 
-**不用脚本，手动拉镜像**（不想 `curl | bash` 的走这条，效果一样）
+下面是几种进阶变体。纯 compose 拉镜像的标准装法见上面「纯 docker compose 装法」一节，这里不重复。
 
-```bash
-mkdir -p /vol1/docker/fnstart && cd /vol1/docker/fnstart
-curl -fsSLO https://raw.githubusercontent.com/IceNoproblem/fnstart/main/docker-compose.yml
-printf 'FNSTART_IMAGE=icenoproblem/fnstart:latest\nACCESS_TOKEN=%s\n' "$(openssl rand -hex 16)" > .env
-docker compose pull && docker compose up -d
-```
-
-镜像有 `linux/amd64` 和 `linux/arm64` 两个架构，飞牛的 x86 机器和 arm 机器都能用。**前提是这台机器拉得到 Docker Hub**——国内直连一般不通，得先给 daemon 配个镜像加速（飞牛自带的那个就够）。
-
-**手动 compose**（不想用安装脚本）
+**源码构建**（要改了代码再跑，或者不想用我发的镜像）
 
 ```bash
+git clone https://github.com/IceNoproblem/fnstart.git /vol1/docker/fnstart
 cd /vol1/docker/fnstart
 ./scripts/new-token.sh --write
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
+
+`build:` 不写在默认的 `docker-compose.yml` 里，而是放在 `docker-compose.build.yml` 这个叠加层。
+所以**只下载 yml 的人永远不会碰到「找不到 Dockerfile」**——那份文件只拉镜像，不构建。
+需要构建时多带一个 `-f` 就够。
 
 **docker run 两行流**（没有 compose 插件，或构建不起来时用）
 

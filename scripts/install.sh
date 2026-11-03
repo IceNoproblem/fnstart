@@ -103,10 +103,16 @@ fi
 IMG=${NODE_IMAGE:-node:22-alpine}
 
 if [ "$use_compose" = 1 ]; then
+  # 显式指定 -f 时 compose 不会自动带上 docker-compose.override.yml，
+  # 而存储空间的挂载就在那个文件里 —— 必须自己按顺序加进来，
+  # 后出现的文件覆盖先出现的，所以 override 放最后。
+  COMPOSE=(-f docker-compose.yml -f docker-compose.build.yml)
+  [ -f docker-compose.override.yml ] && COMPOSE+=(-f docker-compose.override.yml)
+
   say "启动容器（第一次要构建镜像，一两分钟）"
   # 构建日志太吵，只在失败时把最后几行甩出来 —— 成功就安静
   LOG=$(mktemp)
-  if docker compose up -d --build >"$LOG" 2>&1; then
+  if docker compose "${COMPOSE[@]}" up -d --build >"$LOG" 2>&1; then
     rm -f "$LOG"
   else
     echo

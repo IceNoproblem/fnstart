@@ -5,6 +5,12 @@
  * 连闰月都认得（2025-07-25 → 闰六月）。比自己维护一份 1900-2100 的
  * 六十甲子数据表可靠得多，也省掉十几 KB。
  *
+ * 坑：不同引擎的 formatToParts 输出格式不一样：
+ *   - V8（Chrome / Node）：month="十月" day="7"（阿拉伯数字）
+ *   - JavaScriptCore（Safari）：month="十月" day="初七"（中文日名）
+ * 早期版本直接 Number(day)，在 Safari 里全是 NaN，农历整行消失。
+ * 所以这里同时认两种格式，月份别名（冬月/腊月/正月/十一/十二）也全认。
+ *
  * 节日和法定假日是硬编码规则。**不含调休**：哪天补班、假期怎么挪，
  * 每年由国务院单独公布，写死进前端必然会过期，这里只标「这天是法定假日」。
  */
@@ -19,6 +25,62 @@
     if (n === 20) return '二十';
     if (n < 30) return `廿${CN[n - 21]}`;
     return '三十';
+  }
+
+  /** 中文日名 → 数字：初一=1、初十=10、十一=11、二十=20、廿一=21、三十=30 */
+  function parseCnDay(s) {
+    if (!s) return NaN;
+    // 已经是数字（V8）
+    if (/^\d+$/.test(s)) return Number(s);
+    const map = { 初: 0, 十: 10, 廿: 20, 卅: 30 };
+    // 初一~初九
+    if (s.startsWith('初')) {
+      const rest = s.slice(1);
+      if (rest === '十') return 10;
+      const i = CN.indexOf(rest);
+      return i >= 0 ? i + 1 : NaN;
+    }
+    // 二十 / 廿 X
+    if (s === '二十') return 20;
+    if (s.startsWith('廿')) {
+      const rest = s.slice(1);
+      if (!rest) return 20;
+      const i = CN.indexOf(rest);
+      return i >= 0 ? 21 + i : NaN;
+    }
+    if (s === '三十') return 30;
+    if (s.startsWith('三十')) {
+      const rest = s.slice(2);
+      if (!rest) return 30;
+      return NaN;
+    }
+    if (s.startsWith('十')) {
+      const rest = s.slice(1);
+      if (!rest) return 10;
+      const i = CN.indexOf(rest);
+      return i >= 0 ? 11 + i : NaN;
+    }
+    return NaN;
+  }
+
+  /** 中文月名 → 数字。覆盖两套引擎可能给出的所有别名 */
+  function parseCnMonth(monthText) {
+    if (!monthText) return 0;
+    const bare = monthText.replace('闰', '').replace('月', '');
+    if (/^\d+$/.test(bare)) return Number(bare);
+    if (bare === '正' || bare === '一') return 1;
+    if (bare === '二' || bare === '杏') return 2;
+    if (bare === '三' || bare === '桃') return 3;
+    if (bare === '四' || bare === '槐') return 4;
+    if (bare === '五' || bare === '榴') return 5;
+    if (bare === '六' || bare === '荷') return 6;
+    if (bare === '七' || bare === '兰') return 7;
+    if (bare === '八' || bare === '桂') return 8;
+    if (bare === '九' || bare === '菊') return 9;
+    if (bare === '十' || bare === '阳') return 10;
+    if (bare === '十一' || bare === '冬' || bare === '冬月') return 11;
+    if (bare === '十二' || bare === '腊' || bare === '腊月') return 12;
+    return CN.indexOf(bare) + 1 || 0;
   }
 
   let fmt = null;
@@ -38,17 +100,11 @@
     try {
       const parts = fmt.formatToParts(date);
       const get = (t) => parts.find((p) => p.type === t)?.value || '';
-      const monthText = get('month'); // 九月 / 闰六月 / 十一月
-      const dayNum = Number(get('day'));
-      if (!monthText || !dayNum) return null;
+      const monthText = get('month'); // 十月 / 正月 / 冬月 / 腊月 / 闰六月
+      const dayNum = parseCnDay(get('day')); // "初七" 或 "7" 都能认
+      if (!monthText || !dayNum || Number.isNaN(dayNum)) return null;
       const isLeap = monthText.startsWith('闰');
-      // 月份数字：从中文月名反查，「十一月」「十二月」要特殊处理
-      const bare = monthText.replace('闰', '').replace('月', '');
-      let month;
-      if (bare === '十一') month = 11;
-      else if (bare === '十二' || bare === '腊') month = 12;
-      else if (bare === '正' || bare === '一') month = 1;
-      else month = CN.indexOf(bare) + 1;
+      const month = parseCnMonth(monthText);
       if (!month) return null;
       return { month, day: dayNum, isLeap, monthText, text: cnDay(dayNum) };
     } catch {
@@ -132,5 +188,5 @@
     return null;
   }
 
-  window.LunarUtil = { lunarOf, festivalOf, cnDay, qingmingDay };
+  window.LunarUtil = { lunarOf, festivalOf, cnDay, qingmingDay, parseCnDay, parseCnMonth };
 })();

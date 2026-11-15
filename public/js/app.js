@@ -1278,6 +1278,260 @@ $('#bmImport').addEventListener('click', async (e) => {
   }
 });
 
+/* ---------------- 下载（类 Downie） ---------------- */
+const dl = {
+  modal: $('#downloadModal'),
+  urls: $('#dlUrls'),
+  format: $('#dlFormat'),
+  audio: $('#dlAudio'),
+  subs: $('#dlSubs'),
+  playlist: $('#dlPlaylist'),
+  submit: $('#dlSubmit'),
+  list: $('#dlList'),
+  refresh: $('#dlRefresh'),
+  engine: $('#dlEngine'),
+  engineDot: $('#dlEngineDot'),
+  engineText: $('#dlEngineText'),
+  dir: $('#dlDir'),
+  dirInput: $('#dlDirInput'),
+  dirApply: $('#dlDirApply'),
+  dirTip: $('#dlDirTip'),
+};
+
+function dlStatusLabel(j) {
+  switch (j.status) {
+    case 'queued': return '排队中';
+    case 'running': return `下载中 ${j.progress || 0}%`;
+    case 'done': return '完成';
+    case 'error': return '失败';
+    case 'canceled': return '已取消';
+    default: return j.status;
+  }
+}
+
+function dlSetEngine(eng) {
+  if (!eng) { dl.engine.hidden = true; return; }
+  const ok = !!eng.ytdlp && !!eng.ffmpeg;
+  dl.engine.hidden = false;
+  dl.engineDot.className = `dl-engine-dot ${ok ? 'ok' : 'bad'}`;
+  dl.engineText.textContent = ok
+    ? '引擎就绪：yt-dlp + ffmpeg'
+    : !eng.ytdlp ? '引擎缺失：镜像未安装 yt-dlp' : '引擎缺失：镜像未安装 ffmpeg';
+}
+
+$('#downloadBtn').addEventListener('click', () => {
+  dl.urls.value = '';
+  dl.format.value = 'best';
+  dl.audio.checked = false;
+  dl.subs.checked = false;
+  dl.playlist.checked = false;
+  dl.modal.hidden = false;
+  loadDlEngine();
+  refreshDlList();
+});
+
+async function loadDlEngine() {
+  try {
+    const r = await api('/api/downloads/engine');
+    dlSetEngine(r);
+  } catch {
+    dl.engine.hidden = true;
+  }
+}
+
+dl.submit.addEventListener('click', async () => {
+  const lines = dl.urls.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!lines.length) return toast('先填入至少一个链接', true);
+  const btn = dl.submit;
+  btn.disabled = true;
+  btn.textContent = '加入中…';
+  let added = 0;
+  try {
+    for (const url of lines) {
+      try {
+        await api('/api/downloads', { method: 'POST', body: {
+          url,
+          format: dl.format.value,
+          audioOnly: dl.audio.checked,
+          subtitles: dl.subs.checked,
+          playlist: dl.playlist.checked,
+        } });
+        added++;
+      } catch (e) {
+        toast(`${hostLabel(url)}：${e.message}`, true);
+      }
+    }
+    dl.urls.value = '';
+    if (added) toast(`已加入 ${added} 个下载任务`);
+    else if (!added) toast('全部加入失败', true);
+    refreshDlList();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '加入下载';
+  }
+});
+
+dl.refresh.addEventListener('click', refreshDlList);
+
+dl.dirApply.addEventListener('click', async () => {
+  const v = dl.dirInput.value.trim();
+  if (!v) { dl.dirTip.textContent = '请填写目录路径'; return; }
+  dl.dirApply.disabled = true;
+  try {
+    const r = await api('/api/downloads/dir', { method: 'POST', body: { dir: v } });
+    const set = await api('/api/downloads/dir');
+    const freeGb = set.free ? `${(set.free / 1024 / 1024 / 1024).toFixed(1)} GB` : '';
+    dl.dirTip.textContent = `已保存：${r.dir}${freeGb ? `（剩余 ${freeGb}）` : ''}`;
+    dl.dir.textContent = `保存到：${r.dir}`;
+    refreshDlList();
+  } catch (e) {
+    dl.dirTip.textContent = e.message;
+  } finally {
+    dl.dirApply.disabled = false;
+  }
+});
+
+let dlRefreshing = false;
+async function refreshDlList() {
+  if (dlRefreshing) return;
+  dlRefreshing = true;
+  try {
+    const data = await api('/api/downloads');
+    dlSetEngine(data.engine);
+    if (data.dir) dl.dir.textContent = `保存到：${data.dir}`;
+    if (data.dir) dl.dirInput.value = data.dir;
+    renderDlList(data.jobs || []);
+  } catch {
+    /* 静默：可能是鉴权或断网 */
+  } finally {
+    dlRefreshing = false;
+  }
+}
+
+function renderDlList(jobs) {
+  dl.list.innerHTML = '';
+  if (!jobs.length) {
+    const p = document.createElement('p');
+    p.className = 'dl-empty';
+    p.textContent = '还没有任务，在上面贴上链接点「加入下载」';
+    dl.list.appendChild(p);
+    return;
+  }
+  for (const j of jobs) dl.list.appendChild(buildDlItem(j));
+}
+
+function buildDlItem(j) {
+  const item = document.createElement('div');
+  item.className = `dl-item dl-item-${j.status}`;
+  item.dataset.id = j.id;
+
+  const head = document.createElement('div');
+  head.className = 'dl-item-head';
+  const title = document.createElement('div');
+  title.className = 'dl-item-title';
+  title.textContent = j.title || j.url;   // textContent：标题来自远端，防 XSS
+  const badge = document.createElement('span');
+  badge.className = `dl-badge dl-${j.status}`;
+  badge.textContent = dlStatusLabel(j);
+  head.append(title, badge);
+  item.appendChild(head);
+
+  const meta = document.createElement('div');
+  meta.className = 'dl-item-meta';
+  const bits = [];
+  if (j.stage) bits.push(j.stage);
+  if (j.status === 'running' || j.status === 'queued') bits.push(`${j.progress || 0}%`);
+  if (j.fragTotal > 0) bits.push(`分片 ${j.frag || 0}/${j.fragTotal}`);
+  if (j.speed) bits.push(j.speed);
+  if (j.eta) bits.push(`ETA ${j.eta}`);
+  if (j.size) bits.push(j.size);
+  if (j.error) bits.push(j.error);
+  meta.textContent = bits.join('   ·   ');
+  item.appendChild(meta);
+
+  if (j.status === 'running' || j.status === 'queued') {
+    const bar = document.createElement('div');
+    bar.className = 'dl-bar';
+    const fill = document.createElement('div');
+    fill.className = 'dl-bar-fill';
+    fill.style.width = `${Math.max(0, Math.min(100, j.progress || 0))}%`;
+    bar.appendChild(fill);
+    item.appendChild(bar);
+  }
+
+  // 实时信息流：解析 / 识别 / 下载分片 / 合并，取最近几条
+  if (Array.isArray(j.logs) && j.logs.length) {
+    const logBox = document.createElement('div');
+    logBox.className = 'dl-logs';
+    const recent = j.logs.slice(-5);
+    for (const lg of recent) {
+      const line = document.createElement('div');
+      line.className = `dl-log dl-log-${lg.kind || 'info'}`;
+      const dot = document.createElement('span');
+      dot.className = 'dl-log-dot';
+      const txt = document.createElement('span');
+      txt.textContent = lg.text || '';
+      line.append(dot, txt);
+      logBox.appendChild(line);
+    }
+    item.appendChild(logBox);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'dl-actions';
+  if (j.status === 'running' || j.status === 'queued') {
+    actions.appendChild(dlBtn('取消', 'dl-cancel', 'warn'));
+  }
+  if (j.status === 'error' || j.status === 'canceled') {
+    actions.appendChild(dlBtn('重试', 'dl-retry', 'primary'));
+  }
+  if (j.status === 'done' && j.file) {
+    const open = document.createElement('a');
+    open.className = 'btn sm primary';
+    open.textContent = '打开文件';
+    open.href = `/api/downloads/${j.id}/file`;
+    open.setAttribute('download', '');
+    actions.appendChild(open);
+  }
+  if (j.status !== 'running') {
+    actions.appendChild(dlBtn('删除', 'dl-delete', 'ghost'));
+  }
+  if (actions.childNodes.length) item.appendChild(actions);
+  return item;
+}
+
+function dlBtn(label, act, variant) {
+  const b = document.createElement('button');
+  b.className = `btn sm ${variant === 'primary' ? 'primary' : variant === 'warn' ? 'ghost' : 'ghost'}`;
+  if (variant === 'warn') b.style.color = '#ffc078';
+  b.textContent = label;
+  b.dataset.act = act;
+  return b;
+}
+
+dl.list.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const id = btn.closest('.dl-item')?.dataset.id;
+  if (!id) return;
+  const act = btn.dataset.act;
+  try {
+    if (act === 'dl-cancel') await api(`/api/downloads/${id}/cancel`, { method: 'POST' });
+    else if (act === 'dl-retry') await api(`/api/downloads/${id}/retry`, { method: 'POST' });
+    else if (act === 'dl-delete') await api(`/api/downloads/${id}`, { method: 'DELETE' });
+    refreshDlList();
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+// 弹窗开着时轮询刷新队列（只在有活动任务时少见地打扰）
+setInterval(() => {
+  if (dl.modal.hidden) return;
+  const hasActive = [...dl.list.querySelectorAll('.dl-item-running,.dl-item-queued')].length > 0;
+  if (hasActive) refreshDlList();
+}, 2500);
+
 /* ---------------- 设置 ---------------- */
 const TZ_LIST = [
   ['Asia/Shanghai', '中国标准时间 UTC+8'],

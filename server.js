@@ -16,6 +16,7 @@ import { systemSnapshot, startMetricsWatcher, warmup } from './lib/metrics.js';
 import { containerStats, startContainerWatcher } from './lib/containers.js';
 import { getWeather } from './lib/weather.js';
 import { mediaStats, resolveMediaRoot } from './lib/media.js';
+import * as downloads from './lib/downloads.js';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -905,6 +906,84 @@ async function handleApi(req, res, url) {
   if (p === '/api/export' && method === 'GET') {
     const s = await store.load();
     return json(res, 200, s, { 'Content-Disposition': 'attachment; filename="fnstart-backup.json"' });
+  }
+
+  // 下载引擎（类 Downie 功能）：yt-dlp + ffmpeg
+  if (p === '/api/downloads/engine' && method === 'GET') {
+    return json(res, 200, await downloads.engineStatus());
+  }
+
+  if (p === '/api/downloads' && method === 'GET') {
+    const data = downloads.list();
+    const engine = await downloads.engineStatus();
+    let dir = '';
+    try { dir = await downloads.getDownloadDir(); } catch { /* ignore */ }
+    return json(res, 200, { ...data, engine, dir });
+  }
+
+  // 下载目录：网页可自定义（持久化到 downloads.json）
+  if (p === '/api/downloads/dir' && method === 'GET') {
+    return json(res, 200, await downloads.getDownloadDirSetting());
+  }
+
+  if (p === '/api/downloads/dir' && method === 'POST') {
+    const body = await readJson(req);
+    const r = await downloads.setDownloadDir(body.dir);
+    if (!r.ok) return json(res, 400, { ok: false, error: r.error });
+    return json(res, 200, { ok: true, dir: r.dir });
+  }
+
+  if (p === '/api/downloads' && method === 'POST') {
+    const body = await readJson(req);
+    if (!body.url) return json(res, 400, { ok: false, error: '缺少视频链接' });
+    const r = await downloads.submit({
+      url: body.url,
+      format: body.format || 'best',
+      audioOnly: !!body.audioOnly,
+      subtitles: !!body.subtitles,
+      playlist: !!body.playlist,
+    });
+    if (!r.ok) return json(res, 400, { ok: false, error: r.error });
+    return json(res, 200, { ok: true, job: r.job });
+  }
+
+  if (p.startsWith('/api/downloads/') && p.endsWith('/cancel') && method === 'POST') {
+    const id = p.split('/')[3];
+    const ok = downloads.cancel(id);
+    return json(res, ok ? 200 : 404, { ok });
+  }
+
+  if (p.startsWith('/api/downloads/') && p.endsWith('/retry') && method === 'POST') {
+    const id = p.split('/')[3];
+    const ok = downloads.retry(id);
+    return json(res, ok ? 200 : 404, { ok });
+  }
+
+  if (p.startsWith('/api/downloads/') && p.endsWith('/file') && method === 'GET') {
+    const id = p.split('/')[3];
+    const f = await downloads.getFile(id);
+    if (!f) return json(res, 404, { ok: false, error: '文件不可用' });
+    const ext = path.extname(f.name).toLowerCase().slice(1);
+    const MIME = {
+      mp4: 'video/mp4', mkv: 'video/x-matroska', webm: 'video/webm', mov: 'video/quicktime',
+      m4v: 'video/mp4', ts: 'video/mp2t', mp3: 'audio/mpeg', m4a: 'audio/mp4',
+      flac: 'audio/flac', wav: 'audio/wav', ogg: 'audio/ogg', aac: 'audio/aac',
+    };
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Length': f.size,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(f.name)}"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    fss.createReadStream(f.path).pipe(res);
+    return;
+  }
+
+  if (p.startsWith('/api/downloads/') && method === 'DELETE') {
+    const id = p.split('/')[3];
+    const ok = downloads.remove(id);
+    return json(res, ok ? 200 : 404, { ok });
   }
 
   return json(res, 404, { ok: false, error: '接口不存在' });

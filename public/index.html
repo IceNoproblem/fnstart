@@ -56,6 +56,7 @@
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v11M8 10l4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M5 20h14"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.5 7.6l2 1.2M17.5 15.2l2 1.2M4.5 16.4l2-1.2M17.5 8.8l2-1.2"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
@@ -85,6 +86,9 @@
       </button>
       <button class="tool-btn" id="importBtn" title="导入浏览器书签">
         <svg class="ic"><use href="#i-import"/></svg><span>导入书签</span>
+      </button>
+      <button class="tool-btn" id="downloadBtn" title="下载视频到 NAS（类 Downie）">
+        <svg class="ic"><use href="#i-download"/></svg><span>下载</span>
       </button>
       <button class="tool-btn icon-only" id="fullBtn" title="全屏显示（隐藏浏览器界面）">
         <svg class="ic"><use href="#i-full"/></svg>
@@ -402,6 +406,71 @@
 
 <div class="toast" id="toast" hidden></div>
 <div class="sheet-mask" id="sheetMask" hidden></div>
+
+<!-- 下载（类 Downie） -->
+<div class="modal" id="downloadModal" hidden>
+  <div class="modal-card wide">
+    <header class="modal-head">
+      <h2>下载视频到 NAS</h2>
+      <button class="m-btn" data-close><svg class="ic"><use href="#i-close"/></svg></button>
+    </header>
+
+    <div class="dl-engine" id="dlEngine" hidden>
+      <span class="dl-engine-dot" id="dlEngineDot"></span>
+      <span id="dlEngineText">引擎检测中…</span>
+    </div>
+
+    <div class="field">
+      <label>视频链接<small>支持多行，每行一个；B 站 / YouTube / 抖音 / 微博 等上千个站点</small></label>
+      <textarea id="dlUrls" rows="4" placeholder="https://www.bilibili.com/video/BV1xx411c7mD&#10;https://www.youtube.com/watch?v=xxxx"></textarea>
+    </div>
+
+    <div class="dl-opts">
+      <div class="field grow">
+        <label>清晰度 / 格式</label>
+        <select id="dlFormat" class="sel">
+          <option value="best">最佳（自动选）</option>
+          <option value="worst">最省流量</option>
+          <option value="bestvideo+bestaudio">最高画质（合并音视频）</option>
+          <option value="bv*+ba">1080P</option>
+          <option value="bv*[height&lt;=720]+ba">720P</option>
+          <option value="bv*[height&lt;=480]+ba">480P</option>
+          <option value="mp4">MP4 封装</option>
+          <option value="webm">WebM 封装</option>
+        </select>
+      </div>
+      <label class="switch"><input type="checkbox" id="dlAudio"><span></span>只要音频（转 mp3）</label>
+      <label class="switch"><input type="checkbox" id="dlSubs"><span></span>带字幕</label>
+      <label class="switch"><input type="checkbox" id="dlPlaylist"><span></span>整个播放列表</label>
+    </div>
+
+    <p class="tip" id="dlSsrfTip">下载在服务器端进行。出于安全，内网 / 保留地址会被拒绝；重定向到内网的链接属于已知边界，请只下你信任的来源。</p>
+
+    <div class="field">
+      <label>保存位置<small>容器内的绝对路径，必须可读写（媒体库默认只读挂载，需单独挂成 rw 才能选进去）</small></label>
+      <div class="dl-dir-row">
+        <input id="dlDirInput" class="inp" placeholder="/data/下载" spellcheck="false" autocomplete="off" />
+        <button class="btn ghost sm" id="dlDirApply">应用</button>
+      </div>
+      <p class="tip" id="dlDirTip"></p>
+    </div>
+
+    <div class="modal-foot">
+      <span class="dl-dir" id="dlDir"></span>
+      <div class="spacer"></div>
+      <button class="btn ghost" data-close>关闭</button>
+      <button class="btn primary" id="dlSubmit">加入下载</button>
+    </div>
+
+    <div class="dl-list-head">
+      <span>下载队列</span>
+      <button class="btn ghost sm" id="dlRefresh"><svg class="ic"><use href="#i-refresh"/></svg>刷新</button>
+    </div>
+    <div class="dl-list" id="dlList">
+      <p class="dl-empty" id="dlEmpty">还没有任务</p>
+    </div>
+  </div>
+</div>
 
 <!-- lunar.js 只有打开日历弹窗时才用得上，别让它卡住解析；defer 仍排在 app.js 之前执行 -->
 <script src="/js/lunar.js" defer></script>

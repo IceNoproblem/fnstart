@@ -1357,3 +1357,54 @@ html.no-grain .bg-grain,
 body.no-grain .bg-grain{display:none!important}
 html.no-glow .card-glow{display:none!important}
 html.no-shadow .card{box-shadow:0 0 0 1px rgba(255,255,255,.07)!important}
+
+/* ============ 下载（类 Downie） ============ */
+.dl-engine{display:flex;align-items:center;gap:9px;margin-bottom:14px;padding:9px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);font-size:12.5px;color:var(--ink-2)}
+.dl-engine-dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3);flex:0 0 auto}
+.dl-engine-dot.ok{background:#37d67a;box-shadow:0 0 0 3px rgba(55,214,122,.18)}
+.dl-engine-dot.bad{background:#ff6b7d;box-shadow:0 0 0 3px rgba(255,107,125,.18)}
+
+.dl-opts{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin:4px 0 14px}
+.dl-opts .field{margin-bottom:0}
+.dl-opts .field.grow{flex:1;min-width:200px}
+
+.dl-dir{font-size:11.5px;color:var(--ink-3);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.dl-dir-row{display:flex;gap:8px;align-items:center;margin-top:6px}
+.dl-dir-row .inp{flex:1;min-width:0}
+.inp{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:var(--ink);border-radius:10px;padding:8px 11px;font-size:13px;outline:none}
+.inp:focus{border-color:#4a7dff}
+#dlDirTip{margin-top:7px}
+
+.dl-list-head{display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px;font-size:12px;letter-spacing:.4px;color:var(--ink-2)}
+.dl-list{display:flex;flex-direction:column;gap:10px;max-height:42vh;overflow:auto;scrollbar-width:thin}
+.dl-list::-webkit-scrollbar{width:8px}
+.dl-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:8px}
+
+.dl-empty{text-align:center;padding:26px 10px;font-size:12.5px;color:var(--ink-3);line-height:1.7}
+
+.dl-item{padding:12px 13px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);border-left:2px solid rgba(255,255,255,.14)}
+.dl-item-done{border-left-color:rgba(55,214,122,.6)}
+.dl-item-error{border-left-color:rgba(255,107,125,.6)}
+.dl-item-running{border-left-color:rgba(96,146,255,.7)}
+.dl-item-canceled{border-left-color:rgba(255,255,255,.22)}
+.dl-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.dl-item-title{font-size:13px;color:var(--ink);line-height:1.45;word-break:break-all;min-width:0}
+.dl-badge{flex:0 0 auto;font-size:10.5px;line-height:1;padding:4px 8px;border-radius:7px;white-space:nowrap;background:rgba(255,255,255,.1);color:var(--ink-2)}
+.dl-badge.dl-done{background:rgba(55,214,122,.16);color:#7df0ad}
+.dl-badge.dl-error{background:rgba(255,107,125,.16);color:#ffb0bb}
+.dl-badge.dl-running,.dl-badge.dl-queued{background:rgba(96,146,255,.16);color:#aac3ff}
+.dl-badge.dl-canceled{background:rgba(255,255,255,.08);color:var(--ink-3)}
+.dl-item-meta{margin-top:6px;font-size:11.5px;color:var(--ink-3);line-height:1.5;word-break:break-all;font-variant-numeric:tabular-nums}
+.dl-bar{height:5px;border-radius:4px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
+.dl-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#4a7dff,#7350ff);transition:width .4s ease}
+.dl-logs{margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;gap:4px;max-height:118px;overflow:hidden}
+.dl-log{display:flex;align-items:baseline;gap:7px;font-size:11px;line-height:1.45;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.dl-log-dot{flex:none;width:5px;height:5px;border-radius:50%;background:#6b7a99;margin-top:5px}
+.dl-log-parse .dl-log-dot{background:#4a7dff}
+.dl-log-progress .dl-log-dot{background:#20c997}
+.dl-log-merge .dl-log-dot{background:#f59f00}
+.dl-log-done .dl-log-dot{background:#37b24d}
+.dl-log-error .dl-log-dot{background:#ff6b6b}
+.dl-log-progress{color:var(--ink-2)}
+.dl-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}

@@ -22,6 +22,13 @@ COPY lib ./lib
 COPY public ./public
 COPY scripts ./scripts
 
+# 类 Downie 下载功能：需要 yt-dlp（Python，pip 装）+ ffmpeg（Alpine community 源）。
+# 默认 PATH 上就有 yt-dlp / ffmpeg，CONFIG 里的 ytdlpPath/ffmpegPath 无需改。
+RUN sed -i -E 's@^#(https?://[^ ]*alpine[^ ]*/community)@\1@' /etc/apk/repositories \
+ && apk update \
+ && apk add --no-cache ffmpeg python3 py3-pip \
+ && pip3 install --no-cache-dir --break-system-packages yt-dlp
+
 ENV NODE_ENV=production \
     PORT=3721 \
     DATA_DIR=/data
